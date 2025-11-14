@@ -2,47 +2,159 @@ const { createApp, ref, computed, onMounted } = Vue;
 
 createApp({
     setup() {
+        // Состояние приложения
         const userInput = ref('');
         const loading = ref(false);
         const error = ref('');
         const statusMessage = ref('Готов к работе');
         const lastResponse = ref(null);
-        const history = ref([]);
+        const userQueries = ref([]);
+
+        // Состояние аутентификации
+        const currentUser = ref(null);
+        const isAuthenticated = ref(false);
+        const showLoginForm = ref(false);
+        const showRegisterForm = ref(false);
+
+        // Данные форм
+        const loginData = ref({ email: '', password: '' });
+        const registerData = ref({
+            username: '',
+            email: '',
+            password: '',
+            confirmPassword: '',
+            birthDate: ''
+        });
 
         // Вычисляемые свойства
         const hasResponse = computed(() => lastResponse.value !== null);
         const characterCount = computed(() => userInput.value.length);
 
-        // Форматирование ответа
-        const formatResponse = (text) => {
-            if (!text) return '';
-            return text
-                .replace(/\n/g, '<br>')
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                .replace(/`(.*?)`/g, '<code>$1</code>')
-                .replace(/```([^`]+)```/g, '<pre>$1</pre>');
+        // Проверка аутентификации при загрузке
+        const checkAuth = () => {
+            const token = localStorage.getItem('authToken');
+            const userData = localStorage.getItem('userData');
+
+            if (token && userData) {
+                currentUser.value = JSON.parse(userData);
+                isAuthenticated.value = true;
+                loadUserQueries();
+            }
         };
 
-        // Форматирование времени
-        const formatTime = (timestamp) => {
-            return new Date(timestamp).toLocaleString('ru-RU', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
+        // Загрузка запросов пользователя
+        const loadUserQueries = async () => {
+            if (!isAuthenticated.value) return;
+
+            try {
+                const token = localStorage.getItem('authToken');
+                const response = await fetch('/api/queries?limit=50', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    userQueries.value = data.queries;
+                }
+            } catch (err) {
+                console.error('Ошибка при загрузке запросов:', err);
+            }
         };
 
-        // Обрезка текста для истории
-        const truncateText = (text, length) => {
-            if (text.length <= length) return text;
-            return text.substring(0, length) + '...';
+        // Регистрация
+        const register = async () => {
+            try {
+                if (registerData.value.password !== registerData.value.confirmPassword) {
+                    error.value = 'Пароли не совпадают';
+                    return;
+                }
+
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: registerData.value.username,
+                        email: registerData.value.email,
+                        password: registerData.value.password,
+                        birthDate: registerData.value.birthDate
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    localStorage.setItem('authToken', data.token);
+                    localStorage.setItem('userData', JSON.stringify(data.user));
+                    currentUser.value = data.user;
+                    isAuthenticated.value = true;
+                    showRegisterForm.value = false;
+                    error.value = '';
+                    statusMessage.value = 'Регистрация успешна!';
+                    loadUserQueries();
+                } else {
+                    error.value = data.error;
+                }
+            } catch (err) {
+                error.value = 'Ошибка при регистрации';
+            }
         };
 
-        // Отправка запроса
+        // Авторизация
+        const login = async () => {
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: loginData.value.email,
+                        password: loginData.value.password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    localStorage.setItem('authToken', data.token);
+                    localStorage.setItem('userData', JSON.stringify(data.user));
+                    currentUser.value = data.user;
+                    isAuthenticated.value = true;
+                    showLoginForm.value = false;
+                    error.value = '';
+                    statusMessage.value = 'Авторизация успешна!';
+                    loadUserQueries();
+                } else {
+                    error.value = data.error;
+                }
+            } catch (err) {
+                error.value = 'Ошибка при авторизации';
+            }
+        };
+
+        // Выход
+        const logout = () => {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userData');
+            currentUser.value = null;
+            isAuthenticated.value = false;
+            userQueries.value = [];
+            lastResponse.value = null;
+            statusMessage.value = 'Вы вышли из системы';
+        };
+
+        // Отправка запроса к Gigachat
         const sendQuery = async () => {
+            if (!isAuthenticated.value) {
+                error.value = 'Для отправки запросов необходимо авторизоваться';
+                return;
+            }
+
             const query = userInput.value.trim();
             if (!query || loading.value) return;
 
@@ -51,10 +163,12 @@ createApp({
             statusMessage.value = 'Отправка запроса...';
 
             try {
+                const token = localStorage.getItem('authToken');
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
                     },
                     body: JSON.stringify({ message: query })
                 });
@@ -62,27 +176,17 @@ createApp({
                 const data = await response.json();
 
                 if (data.success) {
-                    // Сохраняем ответ
                     lastResponse.value = {
                         id: Date.now(),
                         content: data.response,
-                        timestamp: new Date()
+                        timestamp: new Date(),
+                        query: query
                     };
 
-                    // Добавляем в историю
-                    history.value.unshift({
-                        id: lastResponse.value.id,
-                        query: query,
-                        response: data.response,
-                        timestamp: new Date()
-                    });
+                    // Обновляем список запросов
+                    await loadUserQueries();
 
-                    // Ограничиваем историю 10 последними запросами
-                    if (history.value.length > 10) {
-                        history.value = history.value.slice(0, 10);
-                    }
-
-                    statusMessage.value = 'Ответ получен';
+                    statusMessage.value = 'Ответ получен и сохранен';
 
                     // Прокрутка к ответу
                     setTimeout(() => {
@@ -106,44 +210,50 @@ createApp({
             }
         };
 
-        // Очистка формы
+        // Остальные функции (clearForm, clearResponse, formatResponse и т.д.)
+        // ... (остаются без изменений из предыдущего кода)
+
         const clearForm = () => {
             userInput.value = '';
             error.value = '';
             statusMessage.value = 'Форма очищена';
         };
 
-        // Очистка ответа
         const clearResponse = () => {
             lastResponse.value = null;
             statusMessage.value = 'Ответ очищен';
         };
 
-        // Очистка истории
-        const clearHistory = () => {
-            history.value = [];
-            statusMessage.value = 'История очищена';
+        const formatResponse = (text) => {
+            if (!text) return '';
+            return text
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/```([^`]+)```/g, '<pre>$1</pre>');
         };
 
-        // Загрузка из истории
-        const loadFromHistory = (index) => {
-            const historyItem = history.value[index];
-            userInput.value = historyItem.query;
-            lastResponse.value = {
-                id: historyItem.id,
-                content: historyItem.response,
-                timestamp: historyItem.timestamp
-            };
-            statusMessage.value = 'Запрос загружен из истории';
+        const formatTime = (timestamp) => {
+            return new Date(timestamp).toLocaleString('ru-RU', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         };
 
-        // Копирование в буфер обмена
+        const truncateText = (text, length) => {
+            if (text.length <= length) return text;
+            return text.substring(0, length) + '...';
+        };
+
         const copyToClipboard = async () => {
             try {
                 await navigator.clipboard.writeText(lastResponse.value.content);
                 statusMessage.value = 'Ответ скопирован в буфер обмена';
 
-                // Временное подтверждение
                 const originalText = error.value;
                 error.value = '✅ Ответ скопирован!';
                 setTimeout(() => {
@@ -154,7 +264,6 @@ createApp({
             }
         };
 
-        // Скачивание ответа
         const downloadResponse = () => {
             if (!lastResponse.value) return;
 
@@ -187,6 +296,8 @@ createApp({
                 statusMessage.value = 'Сервер недоступен';
                 error.value = 'Не удалось подключиться к серверу';
             }
+
+            checkAuth();
         });
 
         return {
@@ -195,19 +306,26 @@ createApp({
             error,
             statusMessage,
             lastResponse,
-            history,
+            userQueries,
+            currentUser,
+            isAuthenticated,
+            showLoginForm,
+            showRegisterForm,
+            loginData,
+            registerData,
             hasResponse,
             characterCount,
+            register,
+            login,
+            logout,
             sendQuery,
             clearForm,
             clearResponse,
-            clearHistory,
-            loadFromHistory,
-            copyToClipboard,
-            downloadResponse,
             formatResponse,
             formatTime,
-            truncateText
+            truncateText,
+            copyToClipboard,
+            downloadResponse
         };
     }
 }).mount('#app');
