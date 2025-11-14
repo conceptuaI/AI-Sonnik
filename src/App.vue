@@ -52,7 +52,7 @@ export default {
     async sendMessage(message) {
       if (!message.trim() || this.loading) return;
 
-      // Добавляем сообщение пользователя
+
       const userMessage = {
         id: Date.now(),
         type: 'user',
@@ -76,7 +76,7 @@ export default {
         const data = await response.json();
 
         if (data.success) {
-          // Добавляем ответ бота
+
           const botMessage = {
             id: Date.now() + 1,
             type: 'bot',
@@ -92,7 +92,7 @@ export default {
         this.error = `Ошибка: ${err.message}`;
         this.statusMessage = 'Ошибка при отправке';
 
-        // Добавляем сообщение об ошибке в чат
+
         const errorMessage = {
           id: Date.now() + 1,
           type: 'bot',

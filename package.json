@@ -1,7 +1,7 @@
 {
-  "name": "gigachat-app",
+  "name": "ai-sonnik",
   "version": "1.0.0",
-  "description": "Gigachat API with Node.js server and user authentication",
+  "description": "AI Dream Interpreter with Gigachat API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -18,5 +18,14 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
-  }
+  },
+  "keywords": [
+    "dream",
+    "interpreter",
+    "sonnik",
+    "ai",
+    "gigachat"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }

@@ -48,33 +48,23 @@ const db = new sqlite3.Database('./gigachat.db', (err) => {
 function initDatabase() {
     // Таблица пользователей
     db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    birth_date TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+                                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                 username TEXT UNIQUE NOT NULL,
+                                                 email TEXT UNIQUE NOT NULL,
+                                                 password TEXT NOT NULL,
+                                                 birth_date TEXT NOT NULL,
+                                                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
 
-    // Таблица запросов
-    db.run(`CREATE TABLE IF NOT EXISTS queries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    query_text TEXT NOT NULL,
-    response_text TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users (id)
-  )`);
-
-    // Таблица сессий (опционально)
-    db.run(`CREATE TABLE IF NOT EXISTS user_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    token TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users (id)
-  )`);
+    // Таблица снов
+    db.run(`CREATE TABLE IF NOT EXISTS dreams (
+                                                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                  user_id INTEGER NOT NULL,
+                                                  dream_text TEXT NOT NULL,
+                                                  interpretation_text TEXT NOT NULL,
+                                                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                                  FOREIGN KEY (user_id) REFERENCES users (id)
+        )`);
 }
 
 // Middleware для проверки JWT токена
@@ -139,6 +129,47 @@ async function ensureToken() {
         await getAccessToken();
     }
     return accessToken;
+}
+
+// Промт для ИИ-Сонника
+const DREAM_INTERPRETER_PROMPT = `Ты — ИИ-Сонник. Твоя задача — интерпретировать сны пользователей в доброжелательном, немного мистическом стиле. 
+Ты можешь обращаться по имени, использовать мягкие метафоры и ассоциации. 
+Если сон содержит тревожные образы, ты утешай и предлагай символическое толкование. 
+Не используй медицинские или психологические термины.`;
+
+// Функция для интерпретации снов
+async function interpretDream(dreamDescription, userName = 'дорогой друг') {
+    const token = await ensureToken();
+
+    const response = await axiosInstance.post(
+        `${GIGACHAT_CONFIG.apiUrl}/chat/completions`,
+        {
+            model: "GigaChat",
+            messages: [
+                {
+                    role: "system",
+                    content: DREAM_INTERPRETER_PROMPT
+                },
+                {
+                    role: "user",
+                    content: `Пожалуйста, интерпретируй этот сон: "${dreamDescription}". ${userName !== 'дорогой друг' ? `Имя пользователя: ${userName}` : ''}`
+                }
+            ],
+            temperature: 0.8,
+            max_tokens: 1500,
+            top_p: 0.9
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            timeout: 30000
+        }
+    );
+
+    return response.data.choices[0].message.content;
 }
 
 // Регистрация пользователя
@@ -295,12 +326,12 @@ app.get('/api/profile', authenticateToken, (req, res) => {
     );
 });
 
-// Сохранение запроса в базу данных
-function saveQueryToDatabase(userId, query, response) {
+// Сохранение сна в базу данных
+function saveDreamToDatabase(userId, dream, interpretation) {
     return new Promise((resolve, reject) => {
         db.run(
-            `INSERT INTO queries (user_id, query_text, response_text) VALUES (?, ?, ?)`,
-            [userId, query, response],
+            `INSERT INTO dreams (user_id, dream_text, interpretation_text) VALUES (?, ?, ?)`,
+            [userId, dream, interpretation],
             function(err) {
                 if (err) {
                     reject(err);
@@ -312,27 +343,27 @@ function saveQueryToDatabase(userId, query, response) {
     });
 }
 
-// Получение истории запросов пользователя
-app.get('/api/queries', authenticateToken, (req, res) => {
+// Получение истории снов пользователя
+app.get('/api/dreams', authenticateToken, (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
 
     db.all(
-        `SELECT id, query_text, response_text, created_at 
-     FROM queries 
+        `SELECT id, dream_text, interpretation_text, created_at 
+     FROM dreams 
      WHERE user_id = ? 
      ORDER BY created_at DESC 
      LIMIT ? OFFSET ?`,
         [req.user.userId, limit, offset],
-        (err, queries) => {
+        (err, dreams) => {
             if (err) {
                 return res.status(500).json({ error: 'Ошибка базы данных' });
             }
 
-            // Получение общего количества запросов
+            // Получение общего количества снов
             db.get(
-                `SELECT COUNT(*) as total FROM queries WHERE user_id = ?`,
+                `SELECT COUNT(*) as total FROM dreams WHERE user_id = ?`,
                 [req.user.userId],
                 (err, countResult) => {
                     if (err) {
@@ -341,11 +372,11 @@ app.get('/api/queries', authenticateToken, (req, res) => {
 
                     res.json({
                         success: true,
-                        queries: queries.map(q => ({
-                            id: q.id,
-                            query: q.query_text,
-                            response: q.response_text,
-                            createdAt: q.created_at
+                        dreams: dreams.map(d => ({
+                            id: d.id,
+                            dream: d.dream_text,
+                            interpretation: d.interpretation_text,
+                            createdAt: d.created_at
                         })),
                         pagination: {
                             page,
@@ -360,75 +391,65 @@ app.get('/api/queries', authenticateToken, (req, res) => {
     );
 });
 
-// API endpoint для отправки сообщений в Gigachat
-app.post('/api/chat', authenticateToken, async (req, res) => {
+// API endpoint для интерпретации снов
+app.post('/api/interpret-dream', authenticateToken, async (req, res) => {
     try {
-        const { message } = req.body;
+        const { dream } = req.body;
 
-        if (!message) {
-            return res.status(400).json({ error: 'Сообщение обязательно' });
+        if (!dream) {
+            return res.status(400).json({ error: 'Описание сна обязательно' });
         }
 
-        console.log('📨 Получено сообщение от пользователя', req.user.userId, ':', message.substring(0, 50) + '...');
+        console.log('🌙 Интерпретация сна от пользователя', req.user.userId, ':', dream.substring(0, 50) + '...');
 
-        const token = await ensureToken();
+        const interpretation = await interpretDream(dream, req.user.username);
 
-        const response = await axiosInstance.post(
-            `${GIGACHAT_CONFIG.apiUrl}/chat/completions`,
-            {
-                model: "GigaChat",
-                messages: [
-                    {
-                        role: "user",
-                        content: message
-                    }
-                ],
-                temperature: 0.7,
-                max_tokens: 1000
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                timeout: 30000
-            }
-        );
-
-        console.log('✅ Ответ от Gigachat получен');
-
-        const responseText = response.data.choices[0].message.content;
-
-        // Сохранение запроса и ответа в базу данных
+        // Сохранение сна и интерпретации в базу данных
         try {
-            await saveQueryToDatabase(req.user.userId, message, responseText);
-            console.log('💾 Запрос сохранен в базу данных');
+            await saveDreamToDatabase(req.user.userId, dream, interpretation);
+            console.log('💾 Сон сохранен в базу данных');
         } catch (dbError) {
             console.error('❌ Ошибка при сохранении в БД:', dbError);
         }
 
         res.json({
             success: true,
-            response: responseText
+            interpretation: interpretation
         });
 
     } catch (error) {
-        console.error('❌ Ошибка при обращении к Gigachat API:');
+        console.error('❌ Ошибка при интерпретации сна:');
         console.error('Сообщение:', error.message);
 
         if (error.response) {
             console.error('Статус:', error.response.status);
-            if (error.response.status === 401) {
-                console.error('Ошибка аутентификации');
-            }
         }
 
         res.status(500).json({
-            error: 'Ошибка при обработке запроса',
+            error: 'Ошибка при интерпретации сна',
             details: error.message
         });
     }
+});
+
+// Получение статистики пользователя
+app.get('/api/stats', authenticateToken, (req, res) => {
+    db.get(
+        `SELECT COUNT(*) as total_dreams FROM dreams WHERE user_id = ?`,
+        [req.user.userId],
+        (err, result) => {
+            if (err) {
+                return res.status(500).json({ error: 'Ошибка базы данных' });
+            }
+
+            res.json({
+                success: true,
+                stats: {
+                    totalDreams: result.total_dreams
+                }
+            });
+        }
+    );
 });
 
 // Health check endpoint
@@ -456,6 +477,7 @@ app.get('/', (req, res) => {
 app.listen(PORT, async () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
     console.log(`📱 URL: http://localhost:${PORT}`);
+    console.log(`🌙 ИИ-Сонник активирован`);
 
     if (GIGACHAT_CONFIG.authorizationKey === 'YOUR_AUTHORIZATION_KEY_HERE') {
         console.log('❌ ВНИМАНИЕ: Установите правильный Authorization Key в файле server.js');

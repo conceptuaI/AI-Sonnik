@@ -3,12 +3,12 @@ const { createApp, ref, computed, onMounted } = Vue;
 createApp({
     setup() {
         // Состояние приложения
-        const userInput = ref('');
+        const dreamInput = ref('');
         const loading = ref(false);
         const error = ref('');
         const statusMessage = ref('Готов к работе');
         const lastResponse = ref(null);
-        const userQueries = ref([]);
+        const userDreams = ref([]);
 
         // Состояние аутентификации
         const currentUser = ref(null);
@@ -28,7 +28,7 @@ createApp({
 
         // Вычисляемые свойства
         const hasResponse = computed(() => lastResponse.value !== null);
-        const characterCount = computed(() => userInput.value.length);
+        const dreamCharacterCount = computed(() => dreamInput.value.length);
 
         // Проверка аутентификации при загрузке
         const checkAuth = () => {
@@ -38,17 +38,17 @@ createApp({
             if (token && userData) {
                 currentUser.value = JSON.parse(userData);
                 isAuthenticated.value = true;
-                loadUserQueries();
+                loadUserDreams();
             }
         };
 
-        // Загрузка запросов пользователя
-        const loadUserQueries = async () => {
+        // Загрузка снов пользователя
+        const loadUserDreams = async () => {
             if (!isAuthenticated.value) return;
 
             try {
                 const token = localStorage.getItem('authToken');
-                const response = await fetch('/api/queries?limit=50', {
+                const response = await fetch('/api/dreams?limit=50', {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -57,10 +57,10 @@ createApp({
                 const data = await response.json();
 
                 if (data.success) {
-                    userQueries.value = data.queries;
+                    userDreams.value = data.dreams;
                 }
             } catch (err) {
-                console.error('Ошибка при загрузке запросов:', err);
+                console.error('Ошибка при загрузке снов:', err);
             }
         };
 
@@ -95,7 +95,16 @@ createApp({
                     showRegisterForm.value = false;
                     error.value = '';
                     statusMessage.value = 'Регистрация успешна!';
-                    loadUserQueries();
+                    loadUserDreams();
+
+                    // Очистка формы
+                    registerData.value = {
+                        username: '',
+                        email: '',
+                        password: '',
+                        confirmPassword: '',
+                        birthDate: ''
+                    };
                 } else {
                     error.value = data.error;
                 }
@@ -128,7 +137,10 @@ createApp({
                     showLoginForm.value = false;
                     error.value = '';
                     statusMessage.value = 'Авторизация успешна!';
-                    loadUserQueries();
+                    loadUserDreams();
+
+                    // Очистка формы
+                    loginData.value = { email: '', password: '' };
                 } else {
                     error.value = data.error;
                 }
@@ -143,34 +155,35 @@ createApp({
             localStorage.removeItem('userData');
             currentUser.value = null;
             isAuthenticated.value = false;
-            userQueries.value = [];
+            userDreams.value = [];
             lastResponse.value = null;
+            dreamInput.value = '';
             statusMessage.value = 'Вы вышли из системы';
         };
 
-        // Отправка запроса к Gigachat
-        const sendQuery = async () => {
+        // Интерпретация сна
+        const interpretDream = async () => {
             if (!isAuthenticated.value) {
-                error.value = 'Для отправки запросов необходимо авторизоваться';
+                error.value = 'Для интерпретации снов необходимо авторизоваться';
                 return;
             }
 
-            const query = userInput.value.trim();
-            if (!query || loading.value) return;
+            const dream = dreamInput.value.trim();
+            if (!dream || loading.value) return;
 
             loading.value = true;
             error.value = '';
-            statusMessage.value = 'Отправка запроса...';
+            statusMessage.value = '🌙 Расшифровываю сон...';
 
             try {
                 const token = localStorage.getItem('authToken');
-                const response = await fetch('/api/chat', {
+                const response = await fetch('/api/interpret-dream', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ message: query })
+                    body: JSON.stringify({ dream })
                 });
 
                 const data = await response.json();
@@ -178,15 +191,15 @@ createApp({
                 if (data.success) {
                     lastResponse.value = {
                         id: Date.now(),
-                        content: data.response,
+                        interpretation: data.interpretation,
                         timestamp: new Date(),
-                        query: query
+                        dream: dream
                     };
 
-                    // Обновляем список запросов
-                    await loadUserQueries();
+                    // Обновляем список снов
+                    await loadUserDreams();
 
-                    statusMessage.value = 'Ответ получен и сохранен';
+                    statusMessage.value = '✨ Сон расшифрован';
 
                     // Прокрутка к ответу
                     setTimeout(() => {
@@ -204,26 +217,26 @@ createApp({
                 }
             } catch (err) {
                 error.value = `Ошибка: ${err.message}`;
-                statusMessage.value = 'Ошибка при отправке';
+                statusMessage.value = 'Ошибка при интерпретации сна';
             } finally {
                 loading.value = false;
             }
         };
 
-        // Остальные функции (clearForm, clearResponse, formatResponse и т.д.)
-        // ... (остаются без изменений из предыдущего кода)
-
+        // Очистка формы
         const clearForm = () => {
-            userInput.value = '';
+            dreamInput.value = '';
             error.value = '';
             statusMessage.value = 'Форма очищена';
         };
 
+        // Очистка ответа
         const clearResponse = () => {
             lastResponse.value = null;
-            statusMessage.value = 'Ответ очищен';
+            statusMessage.value = 'Толкование очищено';
         };
 
+        // Форматирование ответа
         const formatResponse = (text) => {
             if (!text) return '';
             return text
@@ -234,6 +247,7 @@ createApp({
                 .replace(/```([^`]+)```/g, '<pre>$1</pre>');
         };
 
+        // Форматирование времени
         const formatTime = (timestamp) => {
             return new Date(timestamp).toLocaleString('ru-RU', {
                 year: 'numeric',
@@ -244,18 +258,21 @@ createApp({
             });
         };
 
+        // Обрезка текста для истории
         const truncateText = (text, length) => {
+            if (!text) return '';
             if (text.length <= length) return text;
             return text.substring(0, length) + '...';
         };
 
+        // Копирование в буфер обмена
         const copyToClipboard = async () => {
             try {
-                await navigator.clipboard.writeText(lastResponse.value.content);
-                statusMessage.value = 'Ответ скопирован в буфер обмена';
+                await navigator.clipboard.writeText(lastResponse.value.interpretation);
+                statusMessage.value = 'Толкование скопировано в буфер обмена';
 
                 const originalText = error.value;
-                error.value = '✅ Ответ скопирован!';
+                error.value = '✅ Толкование скопировано!';
                 setTimeout(() => {
                     error.value = originalText;
                 }, 2000);
@@ -264,20 +281,33 @@ createApp({
             }
         };
 
+        // Скачивание ответа
         const downloadResponse = () => {
             if (!lastResponse.value) return;
 
-            const blob = new Blob([lastResponse.value.content], { type: 'text/plain' });
+            const blob = new Blob([lastResponse.value.interpretation], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `gigachat-response-${new Date().toISOString().slice(0, 10)}.txt`;
+            a.download = `sonnik-${new Date().toISOString().slice(0, 10)}.txt`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            statusMessage.value = 'Ответ скачан';
+            statusMessage.value = 'Толкование скачано';
+        };
+
+        // Загрузка сна из истории
+        const loadFromHistory = (dream) => {
+            dreamInput.value = dream.dream;
+            lastResponse.value = {
+                id: dream.id,
+                interpretation: dream.interpretation,
+                timestamp: new Date(dream.createdAt),
+                dream: dream.dream
+            };
+            statusMessage.value = 'Сон загружен из истории';
         };
 
         // Проверка статуса сервера при загрузке
@@ -301,26 +331,33 @@ createApp({
         });
 
         return {
-            userInput,
+            // Данные
+            dreamInput,
             loading,
             error,
             statusMessage,
             lastResponse,
-            userQueries,
+            userDreams,
             currentUser,
             isAuthenticated,
             showLoginForm,
             showRegisterForm,
             loginData,
             registerData,
+
+            // Вычисляемые свойства
             hasResponse,
-            characterCount,
+            dreamCharacterCount,
+
+            // Методы
             register,
             login,
             logout,
-            sendQuery,
+            interpretDream,
             clearForm,
             clearResponse,
+            loadUserDreams,
+            loadFromHistory,
             formatResponse,
             formatTime,
             truncateText,

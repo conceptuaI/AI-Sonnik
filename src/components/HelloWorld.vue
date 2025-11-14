@@ -93,7 +93,7 @@ export default {
   watch: {
     messages: {
       handler() {
-        // Автопрокрутка к последнему сообщению
+
         this.$nextTick(() => {
           const container = this.$refs.chatContainer;
           if (container) {

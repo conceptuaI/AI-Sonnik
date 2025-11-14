@@ -229,12 +229,60 @@ body {
     border-bottom: 1px solid #ffcdd2;
 }
 
-.warning-message {
-    background: #fff3cd;
-    color: #856404;
-    padding: 15px 30px;
+.welcome-section {
+    padding: 30px;
     text-align: center;
-    border-bottom: 1px solid #ffeaa7;
+    background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+    border-radius: 10px;
+    margin: 20px;
+}
+
+.welcome-section h2 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+}
+
+.welcome-section p {
+    color: #666;
+    margin-bottom: 20px;
+    font-size: 16px;
+}
+
+/* Переключатель режимов */
+.mode-selector {
+    padding: 0 30px;
+    margin-bottom: -10px;
+}
+
+.tabs {
+    display: flex;
+    background: #f8f9fa;
+    border-radius: 10px 10px 0 0;
+    padding: 5px;
+    gap: 5px;
+}
+
+.tab-button {
+    flex: 1;
+    padding: 15px 20px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    color: #666;
+}
+
+.tab-button.active {
+    background: white;
+    color: #2c3e50;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.tab-button:hover:not(.active) {
+    background: rgba(255,255,255,0.5);
 }
 
 /* Секция ввода */
@@ -282,6 +330,17 @@ body {
     opacity: 0.7;
 }
 
+/* Стили для режима снов */
+.dream-textarea {
+    background: linear-gradient(135deg, #fdfcfb, #f3e5f5);
+    border-color: #e1bee7;
+}
+
+.dream-textarea:focus {
+    border-color: #8e24aa;
+    box-shadow: 0 0 0 3px rgba(142, 36, 170, 0.1);
+}
+
 .char-counter {
     text-align: right;
     font-size: 14px;
@@ -321,12 +380,17 @@ body {
     box-shadow: none;
 }
 
-.submit-button.unauthorized {
-    background: linear-gradient(135deg, #6c757d, #495057);
-}
-
 .submit-button.loading {
     animation: pulse 1.5s infinite;
+}
+
+.dream-button {
+    background: linear-gradient(135deg, #8e24aa, #ab47bc) !important;
+}
+
+.dream-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(142, 36, 170, 0.4) !important;
 }
 
 .clear-button {
@@ -345,11 +409,46 @@ body {
     background: #5a6268;
 }
 
+/* Статистика пользователя */
+.user-stats {
+    display: flex;
+    gap: 20px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    margin: 20px;
+    flex-wrap: wrap;
+}
+
+.stat-item {
+    text-align: center;
+    flex: 1;
+    min-width: 100px;
+}
+
+.stat-value {
+    font-size: 2em;
+    font-weight: bold;
+    color: #667eea;
+    display: block;
+}
+
+.stat-label {
+    font-size: 0.9em;
+    color: #666;
+}
+
 /* Секция ответа */
 .response-section {
     padding: 30px;
     border-bottom: 1px solid #e9ecef;
     background: #f8f9fa;
+    animation: fadeIn 0.5s ease-out;
+}
+
+.response-section.dream-response {
+    background: linear-gradient(135deg, #f3e5f5, #e8f5e8);
+    border-left: 4px solid #8e24aa;
 }
 
 .response-header {
@@ -364,6 +463,10 @@ body {
 .response-header h3 {
     color: #2c3e50;
     font-size: 1.5em;
+}
+
+.response-section.dream-response .response-header h3 {
+    color: #8e24aa;
 }
 
 .response-meta {
@@ -469,6 +572,26 @@ body {
     font-size: 1.3em;
 }
 
+.history-filters {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.filter-select {
+    padding: 8px 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 20px;
+    background: white;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
 .history-list {
     display: flex;
     flex-direction: column;
@@ -476,12 +599,19 @@ body {
 }
 
 .history-item {
+    display: flex;
+    gap: 15px;
     padding: 15px;
     border: 1px solid #e0e0e0;
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.3s ease;
     background: white;
+    animation: slideIn 0.3s ease-out;
+}
+
+.history-item.dream-history {
+    border-left: 4px solid #8e24aa;
 }
 
 .history-item:hover {
@@ -492,6 +622,16 @@ body {
 .history-item.active {
     border-color: #667eea;
     background: #e3f2fd;
+}
+
+.history-type {
+    font-size: 1.5em;
+    display: flex;
+    align-items: flex-start;
+}
+
+.history-content {
+    flex: 1;
 }
 
 .history-query {
@@ -515,55 +655,6 @@ body {
     color: #666;
     display: flex;
     justify-content: space-between;
-}
-
-/* Welcome сообщение для неавторизованных пользователей */
-.welcome-section {
-    padding: 30px;
-    text-align: center;
-    background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
-    border-radius: 10px;
-    margin: 20px;
-}
-
-.welcome-section h2 {
-    color: #2c3e50;
-    margin-bottom: 15px;
-}
-
-.welcome-section p {
-    color: #666;
-    margin-bottom: 20px;
-    font-size: 16px;
-}
-
-/* Статистика пользователя */
-.user-stats {
-    display: flex;
-    gap: 20px;
-    padding: 20px;
-    background: #f8f9fa;
-    border-radius: 10px;
-    margin: 20px;
-    flex-wrap: wrap;
-}
-
-.stat-item {
-    text-align: center;
-    flex: 1;
-    min-width: 100px;
-}
-
-.stat-value {
-    font-size: 2em;
-    font-weight: bold;
-    color: #667eea;
-    display: block;
-}
-
-.stat-label {
-    font-size: 0.9em;
-    color: #666;
 }
 
 /* Анимации */
@@ -600,14 +691,6 @@ body {
     }
 }
 
-.response-section {
-    animation: fadeIn 0.5s ease-out;
-}
-
-.history-item {
-    animation: slideIn 0.3s ease-out;
-}
-
 /* Адаптивность */
 @media (max-width: 768px) {
     body {
@@ -636,6 +719,18 @@ body {
     .auth-buttons,
     .user-info {
         justify-content: center;
+    }
+
+    .mode-selector {
+        padding: 0 20px;
+    }
+
+    .tabs {
+        flex-direction: column;
+    }
+
+    .tab-button {
+        text-align: center;
     }
 
     .input-section,
@@ -689,6 +784,33 @@ body {
     .stat-item {
         min-width: auto;
     }
+
+    .history-filters {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .filter-select {
+        width: 100%;
+    }
+
+    .history-item {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .history-type {
+        align-self: flex-start;
+    }
+
+    .response-actions {
+        flex-direction: column;
+    }
+
+    .action-btn {
+        width: 100%;
+        text-align: center;
+    }
 }
 
 @media (max-width: 480px) {
@@ -699,15 +821,6 @@ body {
     .auth-form {
         width: 95%;
         padding: 15px;
-    }
-
-    .response-actions {
-        flex-direction: column;
-    }
-
-    .action-btn {
-        width: 100%;
-        text-align: center;
     }
 }
 
