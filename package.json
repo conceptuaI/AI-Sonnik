@@ -1,28 +1,18 @@
 {
-  "dependencies": {
-    "js-cookie": "^3.0.5",
-    "vue": "^3.5.22"
+  "name": "gigachat-app",
+  "version": "1.0.0",
+  "description": "Gigachat API with Node.js server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
-  "dependenciess": {
-    "vue": "^2.6.14",
-    "js-cookie": "^3.0.1"
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.5.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.1",
-    "vite": "^7.1.11",
-    "vite-plugin-vue-devtools": "^8.0.3"
-  },
-  "engines": {
-    "node": "^20.19.0 || >=22.12.0"
-  },
-  "name": "untitled",
-  "private": true,
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "type": "module"
-  "version": "0.0.0"
-}
+    "nodemon": "^3.0.1"
+  }
 }

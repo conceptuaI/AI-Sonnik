@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gigachat Query Form</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app">
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Gigachat Query Form</h1>
+            <p>Отправьте запрос и получите ответ ниже</p>
+        </div>
+
+        <div class="status-bar">
+            <span v-if="loading" class="loading-spinner"></span>
+            {{ statusMessage }}
+            <button v-if="hasResponse" @click="clearResponse" class="clear-btn">
+                🗑️ Очистить ответ
+            </button>
+        </div>
+
+        <div v-if="error" class="error-message">
+            {{ error }}
+        </div>
+
+        <!-- Форма ввода -->
+        <div class="input-section">
+            <div class="form-group">
+                <label for="userQuery">Ваш запрос:</label>
+                <textarea
+                        id="userQuery"
+                        v-model="userInput"
+                        placeholder="Введите ваш вопрос или запрос здесь..."
+                        class="query-textarea"
+                        :disabled="loading"
+                        rows="8"
+                ></textarea>
+            </div>
+
+            <div class="button-group">
+                <button
+                        @click="sendQuery"
+                        :disabled="!userInput.trim() || loading"
+                        class="submit-button"
+                        :class="{ 'loading': loading }"
+                >
+                    <span v-if="loading">⏳</span>
+                    <span v-else>🚀</span>
+                    {{ loading ? 'Отправка...' : 'Получить ответ' }}
+                </button>
+
+                <button
+                        @click="clearForm"
+                        :disabled="loading"
+                        class="clear-button"
+                >
+                    🗑️ Очистить
+                </button>
+            </div>
+        </div>
+
+        <!-- Блок с ответом -->
+        <div v-if="hasResponse" class="response-section">
+            <div class="response-header">
+                <h3>📋 Ответ от Gigachat:</h3>
+                <div class="response-meta">
+                    <span class="timestamp">Получено: {{ formatTime(lastResponse.timestamp) }}</span>
+                    <span class="char-count">{{ lastResponse.content.length }} символов</span>
+                </div>
+            </div>
+
+            <div class="response-content">
+                <div class="response-text" v-html="formatResponse(lastResponse.content)"></div>
+            </div>
+
+            <div class="response-actions">
+                <button @click="copyToClipboard" class="action-btn">
+                    📋 Копировать
+                </button>
+                <button @click="downloadResponse" class="action-btn">
+                    💾 Скачать
+                </button>
+            </div>
+        </div>
+
+        <!-- История запросов (опционально) -->
+        <div v-if="history.length > 0" class="history-section">
+            <div class="history-header">
+                <h3>📜 История запросов</h3>
+                <button @click="clearHistory" class="clear-btn small">
+                    Очистить историю
+                </button>
+            </div>
+            <div class="history-list">
+                <div
+                        v-for="(item, index) in history"
+                        :key="item.id"
+                        class="history-item"
+                        :class="{ 'active': item.id === lastResponse.id }"
+                        @click="loadFromHistory(index)"
+                >
+                    <div class="history-query">{{ truncateText(item.query, 80) }}</div>
+                    <div class="history-meta">
+                        <span class="timestamp">{{ formatTime(item.timestamp) }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
