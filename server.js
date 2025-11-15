@@ -17,7 +17,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here';
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
 // Создаем кастомный axios instance
 const axiosInstance = axios.create({
     httpsAgent: new https.Agent({
@@ -30,14 +29,15 @@ const GIGACHAT_CONFIG = {
     tokenUrl: 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
     apiUrl: 'https://gigachat.devices.sberbank.ru/api/v1',
     authorizationKey: 'MDE5YTgxNGYtYWM3ZC03MzljLWFkZmUtNjZlMGE3YTA0ODZmOmFhZmMwNDlkLTQ1MGItNDEyZi1hNDhjLTAxNGY2YTljNzJjOQ==',
-    rqUID: '8ed4a69a-4a19-4d19-b4b8-31030eceb020'
+    rqUID: '019a814f-ac7d-739c-adfe-66e0a7a0486f'
 };
 
 // Конфигурация SaluteSpeech API
 const SALUTE_SPEECH_CONFIG = {
     tokenUrl: 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
     apiUrl: 'https://smartspeech.sber.ru/rest/v1/text:synthesize',
-    authorizationKey: 'MDE5YTgxZDYtNjQ5Yi03NzFlLTk3YzAtNzM0ODFiYzQ4NzdmOmQ2YjMxYjc5LTZiNGQtNDIzYS1hNTY1LTBlODMzOGNiNzU0Nw==',
+    recognitionApiUrl: 'https://smartspeech.sber.ru/rest/v1/speech:recognize',
+    authorizationKey: 'MDE5YTgxZDYtNjQ5Yi03NzFlLTk3YzAtNzM0ODFiYzQ4NzdmOjZjY2U2NGQ1LWU3MDgtNGI0NC1iNTVmLTQ1Y2EyZDIzODQzMA==',
     rqUID: '019a81d6-649b-771e-97c0-73481bc4877f'
 };
 
@@ -324,21 +324,57 @@ async function synthesizeSpeech(text, voice = 'Nec_24000') {
     try {
         const token = await ensureSaluteSpeechToken();
 
-        console.log('🔊 Синтез речи для текста:', text.substring(0, 50) + '...');
+        console.log('🔊 Синтез речи для текста:', text.substring(0, 100) + '...');
+        console.log('🎵 Выбранный голос:', voice);
+
+        // Проверяем и очищаем текст
+        if (!text || text.trim().length === 0) {
+            throw new Error('Текст для синтеза не может быть пустым');
+        }
+
+        // Обрезаем текст до максимальной длины
+        const maxLength = 5000;
+        if (text.length > maxLength) {
+            console.warn('⚠️ Текст слишком длинный, обрезаем до', maxLength, 'символов');
+            text = text.substring(0, maxLength);
+        }
+
+        // Очищаем текст
+        text = text.replace(/[^\w\sА-Яа-я.,!?;:()-]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+        // Доступные голоса
+        const availableVoices = {
+            'Nec_24000': 'Nec_24000',
+            'May_24000': 'May_24000',
+            'Turbo_24000': 'Turbo_24000',
+            'Bys_24000': 'Bys_24000',
+            'Kho_24000': 'Kho_24000'
+        };
+
+        const selectedVoice = availableVoices[voice] || 'Nec_24000';
+
+        console.log('🔧 Параметры синтеза:', {
+            text_length: text.length,
+            voice: selectedVoice,
+            format: 'opus'
+        });
+
+        // Создаем URL с параметрами
+        const url = new URL(SALUTE_SPEECH_CONFIG.apiUrl);
+        url.searchParams.append('voice', selectedVoice);
+        url.searchParams.append('format', 'opus');
+        url.searchParams.append('speed', '1.0');
+        url.searchParams.append('emotion', 'neutral');
+
+        console.log('📤 URL запроса:', url.toString());
 
         const response = await axiosInstance.post(
-            SALUTE_SPEECH_CONFIG.apiUrl,
-            {
-                text: text,
-                voice: voice,
-                format: 'opus',
-                speed: 1.0,
-                emotion: 'neutral'
-            },
+            url.toString(),
+            text, // Отправляем только текст
             {
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'text/plain',
                     'Accept': 'audio/ogg'
                 },
                 responseType: 'arraybuffer',
@@ -346,14 +382,19 @@ async function synthesizeSpeech(text, voice = 'Nec_24000') {
             }
         );
 
-        // Генерируем уникальное имя файла
+        console.log('✅ Ответ получен, статус:', response.status);
+        console.log('📊 Размер аудио данных:', response.data.length, 'байт');
+
+        if (!response.data || response.data.length === 0) {
+            throw new Error('Получен пустой аудио ответ');
+        }
+
         const filename = `audio_${uuidv4()}.opus`;
         const filepath = path.join(__dirname, 'public', 'audio', filename);
 
-        // Сохраняем аудио файл
         fs.writeFileSync(filepath, response.data);
+        console.log('💾 Аудио файл сохранен:', filename);
 
-        console.log('✅ Аудио файл сохранен:', filename);
         return filename;
 
     } catch (error) {
@@ -362,9 +403,15 @@ async function synthesizeSpeech(text, voice = 'Nec_24000') {
 
         if (error.response) {
             console.error('Статус:', error.response.status);
+            console.error('Заголовки:', JSON.stringify(error.response.headers, null, 2));
+
+            if (error.response.data) {
+                const errorData = error.response.data.toString();
+                console.error('Данные ошибки:', errorData.substring(0, 500));
+            }
         }
 
-        throw new Error('Не удалось синтезировать речь');
+        throw new Error(`Не удалось синтезировать речь: ${error.message}`);
     }
 }
 
@@ -765,18 +812,291 @@ app.get('/api/chat/history', authenticateToken, async (req, res) => {
     }
 });
 
+
+
+// Альтернативная функция синтеза с формой данных
+// Функция для синтеза речи
+async function synthesizeSpeech(text, voice = 'Nec_24000') {
+    try {
+        const token = await ensureSaluteSpeechToken();
+
+        console.log('🔊 Синтез речи для текста:', text.substring(0, 100) + '...');
+        console.log('🎵 Выбранный голос:', voice);
+
+        // Проверяем и очищаем текст
+        if (!text || text.trim().length === 0) {
+            throw new Error('Текст для синтеза не может быть пустым');
+        }
+
+        // Обрезаем текст до максимальной длины
+        const maxLength = 5000;
+        if (text.length > maxLength) {
+            console.warn('⚠️ Текст слишком длинный, обрезаем до', maxLength, 'символов');
+            text = text.substring(0, maxLength);
+        }
+
+        // Очищаем текст
+        text = text.replace(/[^\w\sА-Яа-я.,!?;:()-]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+        // Доступные голоса
+        const availableVoices = {
+            'Nec_24000': 'Nec_24000',
+            'May_24000': 'May_24000',
+            'Turbo_24000': 'Turbo_24000',
+            'Bys_24000': 'Bys_24000',
+            'Kho_24000': 'Kho_24000'
+        };
+
+        const selectedVoice = availableVoices[voice] || 'Nec_24000';
+
+        console.log('🔧 Параметры синтеза:', {
+            text_length: text.length,
+            voice: selectedVoice,
+            format: 'opus'
+        });
+
+        // Создаем URL с параметрами
+        const url = new URL(SALUTE_SPEECH_CONFIG.apiUrl);
+        url.searchParams.append('voice', selectedVoice);
+        url.searchParams.append('format', 'opus');
+        url.searchParams.append('speed', '1.0');
+        url.searchParams.append('emotion', 'neutral');
+
+        console.log('📤 URL запроса:', url.toString());
+        console.log('📝 Content-Type: application/text');
+
+        const response = await axiosInstance.post(
+            url.toString(),
+            text, // Отправляем только текст
+            {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/text', // ПРАВИЛЬНЫЙ Content-Type!
+                    'Accept': 'audio/ogg'
+                },
+                responseType: 'arraybuffer',
+                timeout: 30000
+            }
+        );
+
+        console.log('✅ Ответ получен, статус:', response.status);
+        console.log('📊 Размер аудио данных:', response.data.length, 'байт');
+
+        if (!response.data || response.data.length === 0) {
+            throw new Error('Получен пустой аудио ответ');
+        }
+
+        const filename = `audio_${uuidv4()}.opus`;
+        const filepath = path.join(__dirname, 'public', 'audio', filename);
+
+        fs.writeFileSync(filepath, response.data);
+        console.log('💾 Аудио файл сохранен:', filename);
+
+        return filename;
+
+    } catch (error) {
+        console.error('❌ Ошибка при синтезе речи:');
+        console.error('Сообщение:', error.message);
+
+        if (error.response) {
+            console.error('Статус:', error.response.status);
+            console.error('Заголовки:', JSON.stringify(error.response.headers, null, 2));
+
+            if (error.response.data) {
+                const errorData = error.response.data.toString();
+                console.error('Данные ошибки:', errorData);
+            }
+        }
+
+        throw new Error(`Не удалось синтезировать речь: ${error.message}`);
+    }
+}
+
+
+// Функция синтеза с SSML
+async function synthesizeSpeechSSML(text, voice = 'Nec_24000') {
+    try {
+        const token = await ensureSaluteSpeechToken();
+
+        console.log('🔊 Синтез речи (SSML) для текста:', text.substring(0, 100) + '...');
+
+        // Подготовка текста
+        if (!text || text.trim().length === 0) {
+            throw new Error('Текст для синтеза не может быть пустым');
+        }
+
+        const maxLength = 5000;
+        if (text.length > maxLength) {
+            text = text.substring(0, maxLength);
+        }
+
+        text = text.replace(/[^\w\sА-Яа-я.,!?;:()-]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+        const selectedVoice = voice || 'Nec_24000';
+
+        // Создаем SSML разметку
+        const ssmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<speak>
+    <voice name="${selectedVoice}">
+        ${text}
+    </voice>
+</speak>`;
+
+        console.log('🔧 SSML контент:', ssmlContent.substring(0, 200) + '...');
+        console.log('📝 Content-Type: application/ssml');
+
+        const response = await axiosInstance.post(
+            SALUTE_SPEECH_CONFIG.apiUrl,
+            ssmlContent,
+            {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/ssml', // SSML Content-Type
+                    'Accept': 'audio/ogg'
+                },
+                responseType: 'arraybuffer',
+                timeout: 30000
+            }
+        );
+
+        console.log('✅ Ответ получен, статус:', response.status);
+        console.log('📊 Размер аудио данных:', response.data.length, 'байт');
+
+        if (!response.data || response.data.length === 0) {
+            throw new Error('Получен пустой аудио ответ');
+        }
+
+        const filename = `audio_${uuidv4()}.opus`;
+        const filepath = path.join(__dirname, 'public', 'audio', filename);
+
+        fs.writeFileSync(filepath, response.data);
+        console.log('💾 Аудио файл сохранен:', filename);
+
+        return filename;
+
+    } catch (error) {
+        console.error('❌ Ошибка при синтезе речи (SSML):', error.message);
+        throw error;
+    }
+}
+
+
+// Альтернативная функция синтеза с формой данных
+async function synthesizeSpeechFormData(text, voice = 'Nec_24000') {
+    try {
+        const token = await ensureSaluteSpeechToken();
+
+        console.log('🔊 Синтез речи (FormData) для текста:', text.substring(0, 100) + '...');
+
+        // Подготовка текста
+        if (!text || text.trim().length === 0) {
+            throw new Error('Текст для синтеза не может быть пустым');
+        }
+
+        const maxLength = 5000;
+        if (text.length > maxLength) {
+            text = text.substring(0, maxLength);
+        }
+
+        text = text.replace(/[^\w\sА-Яа-я.,!?;:()-]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+        const selectedVoice = voice || 'Nec_24000';
+
+        // Создаем FormData
+        const formData = new URLSearchParams();
+        formData.append('text', text);
+        formData.append('voice', selectedVoice);
+        formData.append('format', 'opus');
+        formData.append('speed', '1.0');
+        formData.append('emotion', 'neutral');
+
+        console.log('🔧 FormData параметры:', {
+            text_length: text.length,
+            voice: selectedVoice
+        });
+
+        const response = await axiosInstance.post(
+            SALUTE_SPEECH_CONFIG.apiUrl,
+            formData.toString(), // Отправляем как строку формы
+            {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'audio/ogg'
+                },
+                responseType: 'arraybuffer',
+                timeout: 30000
+            }
+        );
+
+        console.log('✅ Ответ получен, статус:', response.status);
+        console.log('📊 Размер аудио данных:', response.data.length, 'байт');
+
+        if (!response.data || response.data.length === 0) {
+            throw new Error('Получен пустой аудио ответ');
+        }
+
+        const filename = `audio_${uuidv4()}.opus`;
+        const filepath = path.join(__dirname, 'public', 'audio', filename);
+
+        fs.writeFileSync(filepath, response.data);
+        console.log('💾 Аудио файл сохранен:', filename);
+
+        return filename;
+
+    } catch (error) {
+        console.error('❌ Ошибка при синтезе речи (FormData):', error.message);
+        throw error;
+    }
+}
+
+
+// API endpoint для синтеза речи
+// API endpoint для синтеза речи
 // API endpoint для синтеза речи
 app.post('/api/synthesize-speech', authenticateToken, async (req, res) => {
     try {
         const { text, dreamId, voice } = req.body;
 
+        console.log('🔊 Запрос на синтез речи от пользователя', req.user.userId);
+
         if (!text) {
             return res.status(400).json({ error: 'Текст для синтеза обязателен' });
         }
 
-        console.log('🔊 Синтез речи для пользователя', req.user.userId, ':', text.substring(0, 50) + '...');
+        if (typeof text !== 'string') {
+            return res.status(400).json({ error: 'Текст должен быть строкой' });
+        }
 
-        const audioFilename = await synthesizeSpeech(text, voice || 'Nec_24000');
+        if (text.trim().length === 0) {
+            return res.status(400).json({ error: 'Текст не может быть пустым' });
+        }
+
+        let audioFilename;
+        let methodUsed = 'unknown';
+
+        // Пробуем разные методы по порядку
+        const methods = [
+            { name: 'form_data', func: synthesizeSpeechFormData },
+            { name: 'url_params', func: synthesizeSpeech }
+        ];
+
+        for (const method of methods) {
+            try {
+                console.log(`🔊 Пробуем метод: ${method.name}`);
+                audioFilename = await method.func(text, voice || 'Nec_24000');
+                methodUsed = method.name;
+                console.log(`✅ Метод ${method.name} сработал`);
+                break;
+            } catch (error) {
+                console.error(`❌ Метод ${method.name} не сработал:`, error.message);
+                // Продолжаем пробовать следующий метод
+            }
+        }
+
+        if (!audioFilename) {
+            throw new Error('Все методы синтеза речи не сработали');
+        }
 
         // Сохраняем информацию об аудио файле в БД
         try {
@@ -789,7 +1109,8 @@ app.post('/api/synthesize-speech', authenticateToken, async (req, res) => {
         res.json({
             success: true,
             audioUrl: `/audio/${audioFilename}`,
-            filename: audioFilename
+            filename: audioFilename,
+            method: methodUsed
         });
 
     } catch (error) {

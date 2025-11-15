@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ИИ-Сонник & Чат</title>
+    <title>ИИ-Сонник & Синтез Речи</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="/css/style.css">
 </head>
@@ -12,8 +12,8 @@
     <div class="app-container">
         <header class="app-header">
             <div class="header-content">
-                <h1>🌙 ИИ-Сонник & Чат</h1>
-                <p>Расшифруйте сны и общайтесь с AI</p>
+                <h1>🌙 ИИ-Сонник & Синтез Речи</h1>
+                <p>Расшифруйте сны и синтезируйте речь</p>
             </div>
 
             <!-- Секция аутентификации -->
@@ -38,11 +38,11 @@
             <div class="status-bar">
                 <span v-if="loading" class="loading-spinner"></span>
                 {{ statusMessage }}
-                <button v-if="activeTab === 'chat' && chatMessages.length > 0" @click="clearChat" class="clear-btn">
-                    🗑️ Очистить чат
-                </button>
                 <button v-if="activeTab === 'dreams' && hasResponse" @click="clearResponse" class="clear-btn">
                     🗑️ Очистить
+                </button>
+                <button v-if="activeTab === 'speech' && hasAudio" @click="clearAudio" class="clear-btn">
+                    🗑️ Очистить аудио
                 </button>
             </div>
 
@@ -51,9 +51,9 @@
             </div>
 
             <div v-if="!isAuthenticated" class="welcome-section">
-                <h2>Добро пожаловать в мир снов и AI!</h2>
-                <p>Для использования ИИ-Сонника и чата необходимо войти в систему или зарегистрироваться.</p>
-                <p>После регистрации вы сможете сохранять историю толкований снов и общаться с AI.</p>
+                <h2>Добро пожаловать в мир снов и синтеза речи!</h2>
+                <p>Для использования ИИ-Сонника и синтеза речи необходимо войти в систему или зарегистрироваться.</p>
+                <p>После регистрации вы сможете сохранять историю толкований снов и синтезировать речь.</p>
             </div>
 
             <div v-else class="main-content">
@@ -66,16 +66,16 @@
                         🌙 Толкование снов
                     </button>
                     <button
-                            @click="activeTab = 'chat'"
-                            :class="['tab-button', { 'active': activeTab === 'chat' }]"
-                    >
-                        💬 Чат с AI
-                    </button>
-                    <button
                             @click="activeTab = 'speech'"
                             :class="['tab-button', { 'active': activeTab === 'speech' }]"
                     >
                         🔊 Синтез речи
+                    </button>
+                    <button
+                            @click="activeTab = 'history'"
+                            :class="['tab-button', { 'active': activeTab === 'history' }]"
+                    >
+                        📜 История
                     </button>
                 </div>
 
@@ -109,20 +109,12 @@
                             </button>
 
                             <button
-                                    @click="dreamInput = ''"
+                                    @click="clearForm"
                                     :disabled="loading"
                                     class="clear-button"
                             >
                                 🗑️ Очистить
                             </button>
-                        </div>
-                    </div>
-
-                    <!-- Статистика пользователя -->
-                    <div class="user-stats" v-if="userDreams.length > 0">
-                        <div class="stat-item">
-                            <span class="stat-value">{{ userDreams.length }}</span>
-                            <span class="stat-label">Всего снов</span>
                         </div>
                     </div>
 
@@ -148,89 +140,8 @@
                                 💾 Скачать
                             </button>
                             <button @click="synthesizeFromInterpretation" class="action-btn speech-action">
-                                🔊 Озвучить
+                                🔊 Озвучить толкование
                             </button>
-                        </div>
-                    </div>
-
-                    <!-- История снов -->
-                    <div v-if="userDreams.length > 0" class="history-section">
-                        <div class="history-header">
-                            <h3>📜 История снов</h3>
-                            <button @click="loadUserDreams" class="clear-btn small">
-                                Обновить
-                            </button>
-                        </div>
-                        <div class="history-list">
-                            <div
-                                    v-for="dream in userDreams"
-                                    :key="dream.id"
-                                    class="history-item dream-history"
-                                    :class="{ 'active': lastResponse && dream.id === lastResponse.id }"
-                                    @click="loadFromHistory(dream)"
-                            >
-                                <div class="history-type">
-                                    🌙
-                                </div>
-                                <div class="history-content">
-                                    <div class="history-query">{{ truncateText(dream.dream, 80) }}</div>
-                                    <div class="history-response">{{ truncateText(dream.interpretation, 100) }}</div>
-                                    <div class="history-meta">
-                                        <span class="timestamp">{{ formatTime(dream.createdAt) }}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Вкладка чата -->
-                <div v-if="activeTab === 'chat'" class="tab-content">
-                    <div class="chat-container">
-                        <div class="messages-container" ref="chatContainer">
-                            <div
-                                    v-for="message in chatMessages"
-                                    :key="message.id"
-                                    :class="[
-                                    'message',
-                                    message.type === 'user' ? 'user-message' : 'bot-message',
-                                    { 'error-message': message.isError }
-                                ]"
-                            >
-                                <div class="message-content" v-html="formatMessage(message.content)"></div>
-                                <div class="message-timestamp">{{ formatTime(message.timestamp) }}</div>
-                            </div>
-
-                            <div v-if="chatLoading" class="typing-indicator">
-                                <div class="typing-dots">
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                </div>
-                                <span>AI печатает...</span>
-                            </div>
-                        </div>
-
-                        <div class="chat-input-section">
-                            <div class="input-container">
-                                <input
-                                        v-model="chatInput"
-                                        @keyup.enter="sendChatMessage"
-                                        placeholder="Введите ваше сообщение..."
-                                        class="message-input"
-                                        :disabled="chatLoading"
-                                >
-                                <button
-                                        @click="sendChatMessage"
-                                        :disabled="!chatInput.trim() || chatLoading"
-                                        class="send-button"
-                                        :class="{ 'loading': chatLoading }"
-                                >
-                                    <span v-if="chatLoading">⏳</span>
-                                    <span v-else>📤</span>
-                                    Отправить
-                                </button>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -243,7 +154,7 @@
                             <textarea
                                     id="textToSpeech"
                                     v-model="textToSpeech"
-                                    placeholder="Введите текст для синтеза речи..."
+                                    placeholder="Введите текст для синтеза речи или используйте кнопку ниже для автоматического заполнения из толкования сна..."
                                     class="query-textarea"
                                     :disabled="speechLoading"
                                     rows="6"
@@ -264,12 +175,12 @@
                             </button>
 
                             <button
-                                    v-if="hasResponse && activeTab === 'dreams'"
+                                    v-if="hasResponse"
                                     @click="synthesizeFromInterpretation"
                                     :disabled="speechLoading"
                                     class="speech-interpretation-btn"
                             >
-                                🎯 Озвучить толкование
+                                🎯 Заполнить из толкования
                             </button>
 
                             <button
@@ -289,6 +200,42 @@
                                     {{ isPlaying ? 'Пауза' : 'Воспроизвести' }}
                                 </button>
                                 <span class="audio-status">{{ isPlaying ? 'Воспроизводится...' : 'Готово к воспроизведению' }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Вкладка истории -->
+                <div v-if="activeTab === 'history'" class="tab-content">
+                    <!-- История снов -->
+                    <div v-if="userDreams.length > 0" class="history-section">
+                        <div class="history-header">
+                            <h3>🌙 История снов</h3>
+                            <button @click="loadUserDreams" class="clear-btn small">
+                                Обновить
+                            </button>
+                        </div>
+                        <div class="history-list">
+                            <div
+                                    v-for="dream in userDreams"
+                                    :key="dream.id"
+                                    class="history-item dream-history"
+                                    :class="{ 'active': lastResponse && dream.id === lastResponse.id }"
+                                    @click="loadFromHistory(dream)"
+                            >
+                                <div class="history-type">
+                                    🌙
+                                </div>
+                                <div class="history-content">
+                                    <div class="history-query">{{ truncateText(dream.dream, 80) }}</div>
+                                    <div class="history-response">{{ truncateText(dream.interpretation, 100) }}</div>
+                                    <div class="history-meta">
+                                        <span class="timestamp">{{ formatTime(dream.createdAt) }}</span>
+                                        <button @click="loadFromHistory(dream)" class="small-btn">
+                                            📥 Загрузить
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -318,6 +265,12 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Пустое состояние -->
+                    <div v-if="userDreams.length === 0 && audioHistory.length === 0" class="empty-state">
+                        <p>История пуста</p>
+                        <p>Начните с толкования снов или синтеза речи</p>
                     </div>
                 </div>
             </div>
@@ -415,6 +368,569 @@
     </div>
 </div>
 
-<script src="/js/app.js"></script>
+<script>
+    const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            // Состояние приложения
+            const dreamInput = ref('');
+            const loading = ref(false);
+            const error = ref('');
+            const statusMessage = ref('Готов к работе');
+            const lastResponse = ref(null);
+            const userDreams = ref([]);
+            const activeTab = ref('dreams');
+
+            // Состояние аутентификации
+            const currentUser = ref(null);
+            const isAuthenticated = ref(false);
+            const showLoginForm = ref(false);
+            const showRegisterForm = ref(false);
+
+            // Состояние для синтеза речи
+            const textToSpeech = ref('');
+            const speechLoading = ref(false);
+            const audioUrl = ref('');
+            const isPlaying = ref(false);
+            const audioPlayer = ref(null);
+            const audioHistory = ref([]);
+
+            // Данные форм
+            const loginData = ref({ phone: '', password: '' });
+            const registerData = ref({
+                username: '',
+                phone: '',
+                password: '',
+                confirmPassword: ''
+            });
+
+            // Вычисляемые свойства
+            const hasResponse = computed(() => lastResponse.value !== null);
+            const dreamCharacterCount = computed(() => dreamInput.value.length);
+            const hasAudio = computed(() => audioUrl.value !== '');
+
+            // Проверка аутентификации при загрузке
+            const checkAuth = () => {
+                const token = localStorage.getItem('authToken');
+                const userData = localStorage.getItem('userData');
+
+                if (token && userData) {
+                    currentUser.value = JSON.parse(userData);
+                    isAuthenticated.value = true;
+                    loadUserDreams();
+                    loadAudioHistory();
+                }
+            };
+
+            // Загрузка снов пользователя
+            const loadUserDreams = async () => {
+                if (!isAuthenticated.value) return;
+
+                try {
+                    const token = localStorage.getItem('authToken');
+                    const response = await fetch('/api/dreams?limit=50', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        userDreams.value = data.dreams;
+                    }
+                } catch (err) {
+                    console.error('Ошибка при загрузке снов:', err);
+                }
+            };
+
+            // Загрузка истории аудио
+            const loadAudioHistory = async () => {
+                if (!isAuthenticated.value) return;
+
+                try {
+                    const token = localStorage.getItem('authToken');
+                    const response = await fetch('/api/audio-history?limit=20', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        audioHistory.value = data.audioFiles;
+                    }
+                } catch (err) {
+                    console.error('Ошибка при загрузке истории аудио:', err);
+                }
+            };
+
+            // Форматирование номера телефона для отображения
+            const formatPhoneDisplay = (phone) => {
+                if (!phone) return '';
+                const cleaned = phone.replace(/\D/g, '');
+                if (cleaned.length === 11 && cleaned.startsWith('7')) {
+                    return `+7 (${cleaned.substring(1, 4)}) ${cleaned.substring(4, 7)}-${cleaned.substring(7, 9)}-${cleaned.substring(9)}`;
+                }
+                return phone;
+            };
+
+            // Регистрация
+            const register = async () => {
+                try {
+                    if (registerData.value.password !== registerData.value.confirmPassword) {
+                        error.value = 'Пароли не совпадают';
+                        return;
+                    }
+
+                    if (registerData.value.password.length < 6) {
+                        error.value = 'Пароль должен содержать минимум 6 символов';
+                        return;
+                    }
+
+                    const response = await fetch('/api/register', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            username: registerData.value.username,
+                            phone: registerData.value.phone,
+                            password: registerData.value.password
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        localStorage.setItem('authToken', data.token);
+                        localStorage.setItem('userData', JSON.stringify(data.user));
+                        currentUser.value = data.user;
+                        isAuthenticated.value = true;
+                        showRegisterForm.value = false;
+                        error.value = '';
+                        statusMessage.value = 'Регистрация успешна!';
+                        loadUserDreams();
+                        loadAudioHistory();
+
+                        // Очистка формы
+                        registerData.value = {
+                            username: '',
+                            phone: '',
+                            password: '',
+                            confirmPassword: ''
+                        };
+                    } else {
+                        error.value = data.error;
+                    }
+                } catch (err) {
+                    error.value = 'Ошибка при регистрации';
+                }
+            };
+
+            // Авторизация
+            const login = async () => {
+                try {
+                    const response = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            phone: loginData.value.phone,
+                            password: loginData.value.password
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        localStorage.setItem('authToken', data.token);
+                        localStorage.setItem('userData', JSON.stringify(data.user));
+                        currentUser.value = data.user;
+                        isAuthenticated.value = true;
+                        showLoginForm.value = false;
+                        error.value = '';
+                        statusMessage.value = 'Авторизация успешна!';
+                        loadUserDreams();
+                        loadAudioHistory();
+
+                        // Очистка формы
+                        loginData.value = { phone: '', password: '' };
+                    } else {
+                        error.value = data.error;
+                    }
+                } catch (err) {
+                    error.value = 'Ошибка при авторизации';
+                }
+            };
+
+            // Выход
+            const logout = () => {
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('userData');
+                currentUser.value = null;
+                isAuthenticated.value = false;
+                userDreams.value = [];
+                lastResponse.value = null;
+                dreamInput.value = '';
+                audioUrl.value = '';
+                textToSpeech.value = '';
+                statusMessage.value = 'Вы вышли из системы';
+            };
+
+            // Интерпретация сна
+            const interpretDream = async () => {
+                if (!isAuthenticated.value) {
+                    error.value = 'Для интерпретации снов необходимо авторизоваться';
+                    return;
+                }
+
+                const dream = dreamInput.value.trim();
+                if (!dream || loading.value) return;
+
+                loading.value = true;
+                error.value = '';
+                statusMessage.value = '🌙 Расшифровываю сон...';
+
+                try {
+                    const token = localStorage.getItem('authToken');
+                    const response = await fetch('/api/interpret-dream', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ dream })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        lastResponse.value = {
+                            id: Date.now(),
+                            interpretation: data.interpretation,
+                            timestamp: new Date(),
+                            dream: dream,
+                            dreamId: data.dreamId
+                        };
+
+                        // Автоматически заполняем поле для синтеза речи
+                        textToSpeech.value = data.interpretation;
+
+                        // Обновляем список снов
+                        await loadUserDreams();
+
+                        statusMessage.value = '✨ Сон расшифрован';
+                    } else {
+                        throw new Error(data.error || 'Неизвестная ошибка');
+                    }
+                } catch (err) {
+                    error.value = `Ошибка: ${err.message}`;
+                    statusMessage.value = 'Ошибка при интерпретации сна';
+                } finally {
+                    loading.value = false;
+                }
+            };
+
+            // Синтез речи
+            const synthesizeSpeech = async () => {
+                if (!isAuthenticated.value) {
+                    error.value = 'Для синтеза речи необходимо авторизоваться';
+                    return;
+                }
+
+                const text = textToSpeech.value.trim();
+                if (!text || speechLoading.value) return;
+
+                speechLoading.value = true;
+                error.value = '';
+                statusMessage.value = '🔊 Синтезирую речь...';
+
+                try {
+                    const token = localStorage.getItem('authToken');
+                    const response = await fetch('/api/synthesize-speech', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            text: text,
+                            dreamId: lastResponse.value?.dreamId || null
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        audioUrl.value = data.audioUrl;
+                        statusMessage.value = '✅ Речь синтезирована';
+
+                        // Обновляем историю аудио
+                        await loadAudioHistory();
+
+                        // Автоматическое воспроизведение
+                        setTimeout(() => {
+                            playAudio();
+                        }, 500);
+                    } else {
+                        throw new Error(data.error || 'Неизвестная ошибка');
+                    }
+                } catch (err) {
+                    error.value = `Ошибка при синтезе речи: ${err.message}`;
+                    statusMessage.value = 'Ошибка при синтезе речи';
+                } finally {
+                    speechLoading.value = false;
+                }
+            };
+
+            // Синтез речи из толкования сна
+            const synthesizeFromInterpretation = () => {
+                if (lastResponse.value && lastResponse.value.interpretation) {
+                    textToSpeech.value = lastResponse.value.interpretation;
+                    statusMessage.value = 'Текст толкования загружен для синтеза речи';
+                } else {
+                    error.value = 'Сначала получите толкование сна';
+                }
+            };
+
+            // Воспроизведение аудио
+            const playAudio = () => {
+                if (!audioUrl.value) return;
+
+                if (!audioPlayer.value) {
+                    audioPlayer.value = new Audio(audioUrl.value);
+                    audioPlayer.value.addEventListener('ended', () => {
+                        isPlaying.value = false;
+                    });
+                    audioPlayer.value.addEventListener('pause', () => {
+                        isPlaying.value = false;
+                    });
+                }
+
+                if (isPlaying.value) {
+                    audioPlayer.value.pause();
+                    isPlaying.value = false;
+                } else {
+                    audioPlayer.value.play();
+                    isPlaying.value = true;
+                }
+            };
+
+            // Воспроизведение аудио из истории
+            const playAudioFromHistory = (audioUrl) => {
+                const audio = new Audio(audioUrl);
+                audio.play();
+                statusMessage.value = 'Воспроизведение аудио из истории';
+            };
+
+            // Очистка формы сна
+            const clearForm = () => {
+                dreamInput.value = '';
+                error.value = '';
+                statusMessage.value = 'Форма очищена';
+            };
+
+            // Очистка ответа
+            const clearResponse = () => {
+                lastResponse.value = null;
+                textToSpeech.value = '';
+                statusMessage.value = 'Толкование очищено';
+            };
+
+            // Очистка аудио
+            const clearAudio = () => {
+                audioUrl.value = '';
+                isPlaying.value = false;
+                textToSpeech.value = '';
+                if (audioPlayer.value) {
+                    audioPlayer.value.pause();
+                    audioPlayer.value = null;
+                }
+                statusMessage.value = 'Аудио очищено';
+            };
+
+            // Форматирование ответа
+            const formatResponse = (text) => {
+                if (!text) return '';
+                return text
+                    .replace(/\n/g, '<br>')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                    .replace(/`(.*?)`/g, '<code>$1</code>')
+                    .replace(/```([^`]+)```/g, '<pre>$1</pre>');
+            };
+
+            // Форматирование времени
+            const formatTime = (timestamp) => {
+                return new Date(timestamp).toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            };
+
+            // Обрезка текста для истории
+            const truncateText = (text, length) => {
+                if (!text) return '';
+                if (text.length <= length) return text;
+                return text.substring(0, length) + '...';
+            };
+
+            // Копирование в буфер обмена
+            const copyToClipboard = async (text) => {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    statusMessage.value = 'Текст скопирован в буфер обмена';
+
+                    const originalText = error.value;
+                    error.value = '✅ Текст скопирован!';
+                    setTimeout(() => {
+                        error.value = originalText;
+                    }, 2000);
+                } catch (err) {
+                    error.value = 'Ошибка при копировании';
+                }
+            };
+
+            // Скачивание текста
+            const downloadText = (text, prefix) => {
+                if (!text) return;
+
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${prefix}-${new Date().toISOString().slice(0, 10)}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                statusMessage.value = 'Текст скачан';
+            };
+
+            // Загрузка сна из истории
+            const loadFromHistory = (dream) => {
+                dreamInput.value = dream.dream;
+                lastResponse.value = {
+                    id: dream.id,
+                    interpretation: dream.interpretation,
+                    timestamp: new Date(dream.createdAt),
+                    dream: dream.dream
+                };
+                textToSpeech.value = dream.interpretation;
+                activeTab.value = 'dreams';
+                statusMessage.value = 'Сон загружен из истории';
+            };
+
+            // Маска для телефона
+            const formatPhoneInput = (event) => {
+                let input = event.target.value.replace(/\D/g, '');
+
+                if (input.startsWith('7') || input.startsWith('8')) {
+                    input = input.substring(1);
+                }
+
+                if (input.length > 0) {
+                    let formatted = '+7 (';
+
+                    if (input.length > 0) {
+                        formatted += input.substring(0, 3);
+                    }
+                    if (input.length > 3) {
+                        formatted += ') ' + input.substring(3, 6);
+                    }
+                    if (input.length > 6) {
+                        formatted += '-' + input.substring(6, 8);
+                    }
+                    if (input.length > 8) {
+                        formatted += '-' + input.substring(8, 10);
+                    }
+
+                    if (event.target.id === 'login-phone') {
+                        loginData.value.phone = formatted;
+                    } else if (event.target.id === 'register-phone') {
+                        registerData.value.phone = formatted;
+                    }
+                }
+            };
+
+            // Проверка статуса сервера при загрузке
+            const checkHealth = async () => {
+                try {
+                    statusMessage.value = 'Проверка подключения...';
+                    const response = await fetch('/api/health');
+                    const data = await response.json();
+
+                    if (data.status === 'healthy') {
+                        statusMessage.value = 'Подключение установлено';
+                    } else {
+                        statusMessage.value = 'Проблемы с подключением';
+                    }
+                } catch (err) {
+                    statusMessage.value = 'Сервер недоступен';
+                    error.value = 'Не удалось подключиться к серверу';
+                }
+            };
+
+            onMounted(async () => {
+                await checkHealth();
+                checkAuth();
+            });
+
+            return {
+                // Данные
+                dreamInput,
+                loading,
+                error,
+                statusMessage,
+                lastResponse,
+                userDreams,
+                currentUser,
+                isAuthenticated,
+                showLoginForm,
+                showRegisterForm,
+                loginData,
+                registerData,
+                activeTab,
+                textToSpeech,
+                speechLoading,
+                audioUrl,
+                isPlaying,
+                audioHistory,
+
+                // Вычисляемые свойства
+                hasResponse,
+                dreamCharacterCount,
+                hasAudio,
+
+                // Методы
+                register,
+                login,
+                logout,
+                interpretDream,
+                synthesizeSpeech,
+                playAudio,
+                synthesizeFromInterpretation,
+                clearForm,
+                clearResponse,
+                clearAudio,
+                loadUserDreams,
+                loadFromHistory,
+                formatResponse,
+                formatTime,
+                truncateText,
+                copyToClipboard,
+                downloadText,
+                formatPhoneDisplay,
+                formatPhoneInput,
+                playAudioFromHistory
+            };
+        }
+    }).mount('#app');
+</script>
 </body>
 </html>

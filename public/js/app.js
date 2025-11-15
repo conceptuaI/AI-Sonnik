@@ -17,12 +17,6 @@ createApp({
         const showLoginForm = ref(false);
         const showRegisterForm = ref(false);
 
-        // Состояние для чата
-        const chatInput = ref('');
-        const chatLoading = ref(false);
-        const chatMessages = ref([]);
-        const chatContainer = ref(null);
-
         // Состояние для синтеза речи
         const textToSpeech = ref('');
         const speechLoading = ref(false);
@@ -54,7 +48,6 @@ createApp({
                 currentUser.value = JSON.parse(userData);
                 isAuthenticated.value = true;
                 loadUserDreams();
-                loadChatHistory();
                 loadAudioHistory();
             }
         };
@@ -81,48 +74,6 @@ createApp({
             }
         };
 
-        // Загрузка истории чата
-        const loadChatHistory = async () => {
-            if (!isAuthenticated.value) return;
-
-            try {
-                const token = localStorage.getItem('authToken');
-                const response = await fetch('/api/chat/history?limit=50', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    // Преобразуем историю в формат сообщений
-                    chatMessages.value = data.messages.flatMap(msg => [
-                        {
-                            id: msg.id * 2,
-                            type: 'user',
-                            content: msg.message,
-                            timestamp: new Date(msg.createdAt)
-                        },
-                        {
-                            id: msg.id * 2 + 1,
-                            type: 'bot',
-                            content: msg.response,
-                            timestamp: new Date(msg.createdAt)
-                        }
-                    ]);
-
-                    // Если нет истории, добавляем приветственное сообщение
-                    if (chatMessages.value.length === 0) {
-                        addWelcomeMessage();
-                    }
-                }
-            } catch (err) {
-                console.error('Ошибка при загрузке истории чата:', err);
-                addWelcomeMessage();
-            }
-        };
-
         // Загрузка истории аудио
         const loadAudioHistory = async () => {
             if (!isAuthenticated.value) return;
@@ -143,17 +94,6 @@ createApp({
             } catch (err) {
                 console.error('Ошибка при загрузке истории аудио:', err);
             }
-        };
-
-        // Добавление приветственного сообщения в чат
-        const addWelcomeMessage = () => {
-            const welcomeMessage = {
-                id: Date.now(),
-                type: 'bot',
-                content: 'Привет! Я AI помощник. Чем могу вам помочь?',
-                timestamp: new Date()
-            };
-            chatMessages.value.push(welcomeMessage);
         };
 
         // Форматирование номера телефона для отображения
@@ -202,7 +142,6 @@ createApp({
                     error.value = '';
                     statusMessage.value = 'Регистрация успешна!';
                     loadUserDreams();
-                    loadChatHistory();
                     loadAudioHistory();
 
                     // Очистка формы
@@ -245,7 +184,6 @@ createApp({
                     error.value = '';
                     statusMessage.value = 'Авторизация успешна!';
                     loadUserDreams();
-                    loadChatHistory();
                     loadAudioHistory();
 
                     // Очистка формы
@@ -265,10 +203,8 @@ createApp({
             currentUser.value = null;
             isAuthenticated.value = false;
             userDreams.value = [];
-            chatMessages.value = [];
             lastResponse.value = null;
             dreamInput.value = '';
-            chatInput.value = '';
             audioUrl.value = '';
             statusMessage.value = 'Вы вышли из системы';
         };
@@ -309,6 +245,9 @@ createApp({
                         dreamId: data.dreamId
                     };
 
+                    // Автоматически заполняем поле для синтеза речи
+                    textToSpeech.value = data.interpretation;
+
                     // Обновляем список снов
                     await loadUserDreams();
 
@@ -322,86 +261,6 @@ createApp({
             } finally {
                 loading.value = false;
             }
-        };
-
-        // Отправка сообщения в чат
-        const sendChatMessage = async () => {
-            if (!isAuthenticated.value) {
-                error.value = 'Для общения в чате необходимо авторизоваться';
-                return;
-            }
-
-            const message = chatInput.value.trim();
-            if (!message || chatLoading.value) return;
-
-            // Добавляем сообщение пользователя
-            const userMessage = {
-                id: Date.now(),
-                type: 'user',
-                content: message,
-                timestamp: new Date()
-            };
-            chatMessages.value.push(userMessage);
-            chatInput.value = '';
-
-            chatLoading.value = true;
-            error.value = '';
-            statusMessage.value = '💬 Отправка сообщения...';
-
-            try {
-                const token = localStorage.getItem('authToken');
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({ message })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    // Добавляем ответ бота
-                    const botMessage = {
-                        id: Date.now() + 1,
-                        type: 'bot',
-                        content: data.response,
-                        timestamp: new Date()
-                    };
-                    chatMessages.value.push(botMessage);
-                    statusMessage.value = '✅ Ответ получен';
-
-                    // Прокрутка к последнему сообщению
-                    scrollToBottom();
-                } else {
-                    throw new Error(data.error || 'Неизвестная ошибка');
-                }
-            } catch (err) {
-                error.value = `Ошибка: ${err.message}`;
-                statusMessage.value = 'Ошибка при отправке сообщения';
-
-                const errorMessage = {
-                    id: Date.now() + 1,
-                    type: 'bot',
-                    content: `Извините, произошла ошибка: ${err.message}`,
-                    timestamp: new Date(),
-                    isError: true
-                };
-                chatMessages.value.push(errorMessage);
-                scrollToBottom();
-            } finally {
-                chatLoading.value = false;
-            }
-        };
-
-        // Прокрутка чата к низу
-        const scrollToBottom = () => {
-            nextTick(() => {
-                if (chatContainer.value) {
-                    chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
-                }
-            });
         };
 
         // Синтез речи
@@ -493,13 +352,6 @@ createApp({
             audio.play();
         };
 
-        // Очистка чата
-        const clearChat = () => {
-            chatMessages.value = [];
-            addWelcomeMessage();
-            statusMessage.value = 'Чат очищен';
-        };
-
         // Очистка формы сна
         const clearForm = () => {
             dreamInput.value = '';
@@ -510,6 +362,7 @@ createApp({
         // Очистка ответа
         const clearResponse = () => {
             lastResponse.value = null;
+            textToSpeech.value = '';
             statusMessage.value = 'Толкование очищено';
         };
 
@@ -534,11 +387,6 @@ createApp({
                 .replace(/\*(.*?)\*/g, '<em>$1</em>')
                 .replace(/`(.*?)`/g, '<code>$1</code>')
                 .replace(/```([^`]+)```/g, '<pre>$1</pre>');
-        };
-
-        // Форматирование сообщения чата
-        const formatMessage = (text) => {
-            return formatResponse(text);
         };
 
         // Форматирование времени
@@ -598,6 +446,7 @@ createApp({
                 timestamp: new Date(dream.createdAt),
                 dream: dream.dream
             };
+            textToSpeech.value = dream.interpretation;
             statusMessage.value = 'Сон загружен из истории';
         };
 
@@ -651,13 +500,6 @@ createApp({
             }
         };
 
-        // Наблюдатель за сообщениями чата для авто-прокрутки
-        const watchChatMessages = () => {
-            nextTick(() => {
-                scrollToBottom();
-            });
-        };
-
         onMounted(async () => {
             await checkHealth();
             checkAuth();
@@ -678,10 +520,6 @@ createApp({
             loginData,
             registerData,
             activeTab,
-            chatInput,
-            chatLoading,
-            chatMessages,
-            chatContainer,
             textToSpeech,
             speechLoading,
             audioUrl,
@@ -698,27 +536,22 @@ createApp({
             login,
             logout,
             interpretDream,
-            sendChatMessage,
             synthesizeSpeech,
             playAudio,
             synthesizeFromInterpretation,
-            clearChat,
             clearForm,
             clearResponse,
             clearAudio,
             loadUserDreams,
             loadFromHistory,
             formatResponse,
-            formatMessage,
             formatTime,
             truncateText,
             copyToClipboard,
             downloadText,
             formatPhoneDisplay,
             formatPhoneInput,
-            playAudioFromHistory,
-            scrollToBottom,
-            watchChatMessages
+            playAudioFromHistory
         };
     }
 }).mount('#app');
