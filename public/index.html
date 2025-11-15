@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ИИ-Сонник & Чат</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app">
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-content">
+                <h1>🌙 ИИ-Сонник & Чат</h1>
+                <p>Расшифруйте сны и общайтесь с AI</p>
+            </div>
+
+            <!-- Секция аутентификации -->
+            <div class="auth-section" v-if="!isAuthenticated">
+                <div class="auth-buttons">
+                    <button @click="showLoginForm = true; showRegisterForm = false" class="auth-btn">Войти</button>
+                    <button @click="showRegisterForm = true; showLoginForm = false" class="auth-btn">Регистрация</button>
+                </div>
+            </div>
+
+            <!-- Информация о пользователе -->
+            <div class="user-section" v-else>
+                <div class="user-info">
+                    <span>👤 {{ currentUser.username }}</span>
+                    <span class="user-phone">{{ formatPhoneDisplay(currentUser.phone) }}</span>
+                    <button @click="logout" class="logout-btn">Выйти</button>
+                </div>
+            </div>
+        </header>
+
+        <main class="app-main">
+            <div class="status-bar">
+                <span v-if="loading" class="loading-spinner"></span>
+                {{ statusMessage }}
+                <button v-if="activeTab === 'chat' && chatMessages.length > 0" @click="clearChat" class="clear-btn">
+                    🗑️ Очистить чат
+                </button>
+                <button v-if="activeTab === 'dreams' && hasResponse" @click="clearResponse" class="clear-btn">
+                    🗑️ Очистить
+                </button>
+            </div>
+
+            <div v-if="error" class="error-message">
+                {{ error }}
+            </div>
+
+            <div v-if="!isAuthenticated" class="welcome-section">
+                <h2>Добро пожаловать в мир снов и AI!</h2>
+                <p>Для использования ИИ-Сонника и чата необходимо войти в систему или зарегистрироваться.</p>
+                <p>После регистрации вы сможете сохранять историю толкований снов и общаться с AI.</p>
+            </div>
+
+            <div v-else class="main-content">
+                <!-- Переключатель вкладок -->
+                <div class="tabs">
+                    <button
+                            @click="activeTab = 'dreams'"
+                            :class="['tab-button', { 'active': activeTab === 'dreams' }]"
+                    >
+                        🌙 Толкование снов
+                    </button>
+                    <button
+                            @click="activeTab = 'chat'"
+                            :class="['tab-button', { 'active': activeTab === 'chat' }]"
+                    >
+                        💬 Чат с AI
+                    </button>
+                    <button
+                            @click="activeTab = 'speech'"
+                            :class="['tab-button', { 'active': activeTab === 'speech' }]"
+                    >
+                        🔊 Синтез речи
+                    </button>
+                </div>
+
+                <!-- Вкладка толкования снов -->
+                <div v-if="activeTab === 'dreams'" class="tab-content">
+                    <!-- Форма ввода сна -->
+                    <div class="input-section">
+                        <div class="form-group">
+                            <label for="dreamInput">Опишите ваш сон:</label>
+                            <textarea
+                                    id="dreamInput"
+                                    v-model="dreamInput"
+                                    placeholder="Опишите свой сон как можно подробнее... Какие образы, чувства, события вы запомнили?"
+                                    class="query-textarea dream-textarea"
+                                    :disabled="loading"
+                                    rows="6"
+                            ></textarea>
+                            <div class="char-counter">{{ dreamInput.length }} символов</div>
+                        </div>
+
+                        <div class="button-group">
+                            <button
+                                    @click="interpretDream"
+                                    :disabled="!dreamInput.trim() || loading"
+                                    class="submit-button dream-button"
+                                    :class="{ 'loading': loading }"
+                            >
+                                <span v-if="loading">🔮</span>
+                                <span v-else>🌙</span>
+                                {{ loading ? 'Расшифровываю...' : 'Расшифровать сон' }}
+                            </button>
+
+                            <button
+                                    @click="dreamInput = ''"
+                                    :disabled="loading"
+                                    class="clear-button"
+                            >
+                                🗑️ Очистить
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Статистика пользователя -->
+                    <div class="user-stats" v-if="userDreams.length > 0">
+                        <div class="stat-item">
+                            <span class="stat-value">{{ userDreams.length }}</span>
+                            <span class="stat-label">Всего снов</span>
+                        </div>
+                    </div>
+
+                    <!-- Блок с толкованием -->
+                    <div v-if="hasResponse" class="response-section dream-response">
+                        <div class="response-header">
+                            <h3>🔮 Толкование сна</h3>
+                            <div class="response-meta">
+                                <span class="timestamp">Получено: {{ formatTime(lastResponse.timestamp) }}</span>
+                                <span class="char-count">{{ lastResponse.interpretation.length }} символов</span>
+                            </div>
+                        </div>
+
+                        <div class="response-content">
+                            <div class="response-text" v-html="formatResponse(lastResponse.interpretation)"></div>
+                        </div>
+
+                        <div class="response-actions">
+                            <button @click="copyToClipboard(lastResponse.interpretation)" class="action-btn">
+                                📋 Копировать
+                            </button>
+                            <button @click="downloadText(lastResponse.interpretation, 'sonnik')" class="action-btn">
+                                💾 Скачать
+                            </button>
+                            <button @click="synthesizeFromInterpretation" class="action-btn speech-action">
+                                🔊 Озвучить
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- История снов -->
+                    <div v-if="userDreams.length > 0" class="history-section">
+                        <div class="history-header">
+                            <h3>📜 История снов</h3>
+                            <button @click="loadUserDreams" class="clear-btn small">
+                                Обновить
+                            </button>
+                        </div>
+                        <div class="history-list">
+                            <div
+                                    v-for="dream in userDreams"
+                                    :key="dream.id"
+                                    class="history-item dream-history"
+                                    :class="{ 'active': lastResponse && dream.id === lastResponse.id }"
+                                    @click="loadFromHistory(dream)"
+                            >
+                                <div class="history-type">
+                                    🌙
+                                </div>
+                                <div class="history-content">
+                                    <div class="history-query">{{ truncateText(dream.dream, 80) }}</div>
+                                    <div class="history-response">{{ truncateText(dream.interpretation, 100) }}</div>
+                                    <div class="history-meta">
+                                        <span class="timestamp">{{ formatTime(dream.createdAt) }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Вкладка чата -->
+                <div v-if="activeTab === 'chat'" class="tab-content">
+                    <div class="chat-container">
+                        <div class="messages-container" ref="chatContainer">
+                            <div
+                                    v-for="message in chatMessages"
+                                    :key="message.id"
+                                    :class="[
+                                    'message',
+                                    message.type === 'user' ? 'user-message' : 'bot-message',
+                                    { 'error-message': message.isError }
+                                ]"
+                            >
+                                <div class="message-content" v-html="formatMessage(message.content)"></div>
+                                <div class="message-timestamp">{{ formatTime(message.timestamp) }}</div>
+                            </div>
+
+                            <div v-if="chatLoading" class="typing-indicator">
+                                <div class="typing-dots">
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                </div>
+                                <span>AI печатает...</span>
+                            </div>
+                        </div>
+
+                        <div class="chat-input-section">
+                            <div class="input-container">
+                                <input
+                                        v-model="chatInput"
+                                        @keyup.enter="sendChatMessage"
+                                        placeholder="Введите ваше сообщение..."
+                                        class="message-input"
+                                        :disabled="chatLoading"
+                                >
+                                <button
+                                        @click="sendChatMessage"
+                                        :disabled="!chatInput.trim() || chatLoading"
+                                        class="send-button"
+                                        :class="{ 'loading': chatLoading }"
+                                >
+                                    <span v-if="chatLoading">⏳</span>
+                                    <span v-else>📤</span>
+                                    Отправить
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Вкладка синтеза речи -->
+                <div v-if="activeTab === 'speech'" class="tab-content">
+                    <div class="speech-section">
+                        <div class="form-group">
+                            <label for="textToSpeech">Текст для озвучивания:</label>
+                            <textarea
+                                    id="textToSpeech"
+                                    v-model="textToSpeech"
+                                    placeholder="Введите текст для синтеза речи..."
+                                    class="query-textarea"
+                                    :disabled="speechLoading"
+                                    rows="6"
+                            ></textarea>
+                            <div class="char-counter">{{ textToSpeech.length }} символов</div>
+                        </div>
+
+                        <div class="button-group">
+                            <button
+                                    @click="synthesizeSpeech"
+                                    :disabled="!textToSpeech.trim() || speechLoading"
+                                    class="submit-button speech-button"
+                                    :class="{ 'loading': speechLoading }"
+                            >
+                                <span v-if="speechLoading">🔊</span>
+                                <span v-else>🔊</span>
+                                {{ speechLoading ? 'Синтезирую...' : 'Синтезировать речь' }}
+                            </button>
+
+                            <button
+                                    v-if="hasResponse && activeTab === 'dreams'"
+                                    @click="synthesizeFromInterpretation"
+                                    :disabled="speechLoading"
+                                    class="speech-interpretation-btn"
+                            >
+                                🎯 Озвучить толкование
+                            </button>
+
+                            <button
+                                    @click="clearAudio"
+                                    :disabled="speechLoading"
+                                    class="clear-button"
+                            >
+                                🗑️ Очистить
+                            </button>
+                        </div>
+
+                        <!-- Аудио плеер -->
+                        <div v-if="hasAudio" class="audio-player">
+                            <div class="audio-controls">
+                                <button @click="playAudio" class="audio-btn">
+                                    {{ isPlaying ? '⏸️' : '▶️' }}
+                                    {{ isPlaying ? 'Пауза' : 'Воспроизвести' }}
+                                </button>
+                                <span class="audio-status">{{ isPlaying ? 'Воспроизводится...' : 'Готово к воспроизведению' }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- История аудио -->
+                    <div v-if="audioHistory.length > 0" class="history-section">
+                        <div class="history-header">
+                            <h3>🎵 История аудио</h3>
+                        </div>
+                        <div class="history-list">
+                            <div
+                                    v-for="audio in audioHistory"
+                                    :key="audio.id"
+                                    class="history-item audio-history"
+                            >
+                                <div class="history-type">
+                                    🔊
+                                </div>
+                                <div class="history-content">
+                                    <div class="history-query">{{ truncateText(audio.text, 100) }}</div>
+                                    <div class="history-meta">
+                                        <span class="timestamp">{{ formatTime(audio.createdAt) }}</span>
+                                        <button @click="playAudioFromHistory(audio.audioUrl)" class="small-btn">
+                                            ▶️ Воспроизвести
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Форма входа -->
+    <div v-if="showLoginForm" class="auth-modal">
+        <div class="auth-form">
+            <h3>Вход в систему</h3>
+            <form @submit.prevent="login">
+                <div class="form-group">
+                    <label for="login-phone">Номер телефона:</label>
+                    <input
+                            type="text"
+                            id="login-phone"
+                            v-model="loginData.phone"
+                            @input="formatPhoneInput"
+                            placeholder="+7 (912) 345-67-89"
+                            required
+                    >
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Пароль:</label>
+                    <input
+                            type="password"
+                            id="login-password"
+                            v-model="loginData.password"
+                            placeholder="Пароль"
+                            required
+                    >
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="submit-btn">Войти</button>
+                    <button type="button" @click="showLoginForm = false" class="cancel-btn">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Форма регистрации -->
+    <div v-if="showRegisterForm" class="auth-modal">
+        <div class="auth-form">
+            <h3>Регистрация</h3>
+            <form @submit.prevent="register">
+                <div class="form-group">
+                    <label for="register-username">Имя пользователя:</label>
+                    <input
+                            type="text"
+                            id="register-username"
+                            v-model="registerData.username"
+                            placeholder="Имя пользователя"
+                            required
+                    >
+                </div>
+                <div class="form-group">
+                    <label for="register-phone">Номер телефона:</label>
+                    <input
+                            type="text"
+                            id="register-phone"
+                            v-model="registerData.phone"
+                            @input="formatPhoneInput"
+                            placeholder="+7 (912) 345-67-89"
+                            required
+                    >
+                    <small class="hint">Формат: +7 (XXX) XXX-XX-XX</small>
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Пароль:</label>
+                    <input
+                            type="password"
+                            id="register-password"
+                            v-model="registerData.password"
+                            placeholder="Пароль (минимум 6 символов)"
+                            required
+                            minlength="6"
+                    >
+                </div>
+                <div class="form-group">
+                    <label for="register-confirm-password">Подтвердите пароль:</label>
+                    <input
+                            type="password"
+                            id="register-confirm-password"
+                            v-model="registerData.confirmPassword"
+                            placeholder="Подтвердите пароль"
+                            required
+                    >
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="submit-btn">Зарегистрироваться</button>
+                    <button type="button" @click="showRegisterForm = false" class="cancel-btn">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

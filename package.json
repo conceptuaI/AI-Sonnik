@@ -1,20 +1,23 @@
 {
-  "name": "ai-sonnik",
+  "name": "ai-sonnik-chat",
   "version": "1.0.0",
-  "description": "AI Dream Interpreter with Gigachat API",
+  "description": "AI Dream Interpreter and Chat with Gigachat API and SaluteSpeech",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "insecure": "set NODE_TLS_REJECT_UNAUTHORIZED=0 && node server.js"
+    "insecure": "set NODE_TLS_REJECT_UNAUTHORIZED=0 && node server.js",
+    "install-deps": "npm install express cors axios sqlite3 bcryptjs jsonwebtoken uuid",
+    "install-dev": "npm install nodemon --save-dev"
   },
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "axios": "^1.5.0",
+    "axios": "^1.6.0",
     "sqlite3": "^5.1.6",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
@@ -24,8 +27,15 @@
     "interpreter",
     "sonnik",
     "ai",
-    "gigachat"
+    "gigachat",
+    "speech",
+    "synthesis",
+    "chat",
+    "phone-auth"
   ],
   "author": "Your Name",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
 }

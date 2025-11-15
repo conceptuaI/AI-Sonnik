@@ -6,6 +6,8 @@ const https = require('https');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,12 +29,22 @@ const axiosInstance = axios.create({
 const GIGACHAT_CONFIG = {
     tokenUrl: 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
     apiUrl: 'https://gigachat.devices.sberbank.ru/api/v1',
-    authorizationKey: 'MDE5YTgxNGYtYWM3ZC03MzljLWFkZmUtNjZlMGE3YTA0ODZmOjBlMDdiMWMxLTE2OGEtNDAwMi1iNDFiLTU1ZjI4MDk0YTVmMg==',
+    authorizationKey: 'MDE5YTgxNGYtYWM3ZC03MzljLWFkZmUtNjZlMGE3YTA0ODZmOmFhZmMwNDlkLTQ1MGItNDEyZi1hNDhjLTAxNGY2YTljNzJjOQ==',
     rqUID: '8ed4a69a-4a19-4d19-b4b8-31030eceb020'
 };
 
-let accessToken = null;
-let tokenExpires = 0;
+// Конфигурация SaluteSpeech API
+const SALUTE_SPEECH_CONFIG = {
+    tokenUrl: 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
+    apiUrl: 'https://smartspeech.sber.ru/rest/v1/text:synthesize',
+    authorizationKey: 'MDE5YTgxZDYtNjQ5Yi03NzFlLTk3YzAtNzM0ODFiYzQ4NzdmOmQ2YjMxYjc5LTZiNGQtNDIzYS1hNTY1LTBlODMzOGNiNzU0Nw==',
+    rqUID: '019a81d6-649b-771e-97c0-73481bc4877f'
+};
+
+let gigachatAccessToken = null;
+let gigachatTokenExpires = 0;
+let saluteSpeechAccessToken = null;
+let saluteSpeechTokenExpires = 0;
 
 // Инициализация базы данных
 const db = new sqlite3.Database('./gigachat.db', (err) => {
@@ -50,9 +62,8 @@ function initDatabase() {
     db.run(`CREATE TABLE IF NOT EXISTS users (
                                                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                                                  username TEXT UNIQUE NOT NULL,
-                                                 email TEXT UNIQUE NOT NULL,
+                                                 phone TEXT UNIQUE NOT NULL,
                                                  password TEXT NOT NULL,
-                                                 birth_date TEXT NOT NULL,
                                                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )`);
 
@@ -64,6 +75,28 @@ function initDatabase() {
                                                   interpretation_text TEXT NOT NULL,
                                                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                                                   FOREIGN KEY (user_id) REFERENCES users (id)
+        )`);
+
+    // Таблица аудио файлов
+    db.run(`CREATE TABLE IF NOT EXISTS audio_files (
+                                                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                       user_id INTEGER NOT NULL,
+                                                       dream_id INTEGER,
+                                                       text_content TEXT NOT NULL,
+                                                       audio_filename TEXT NOT NULL,
+                                                       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                                       FOREIGN KEY (user_id) REFERENCES users (id),
+        FOREIGN KEY (dream_id) REFERENCES dreams (id)
+        )`);
+
+    // Таблица чатов
+    db.run(`CREATE TABLE IF NOT EXISTS chat_messages (
+                                                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                         user_id INTEGER NOT NULL,
+                                                         message_text TEXT NOT NULL,
+                                                         response_text TEXT NOT NULL,
+                                                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                                         FOREIGN KEY (user_id) REFERENCES users (id)
         )`);
 }
 
@@ -85,8 +118,32 @@ function authenticateToken(req, res, next) {
     });
 }
 
-// Функция для получения access token
-async function getAccessToken() {
+// Функция для валидации номера телефона
+function validatePhone(phone) {
+    const phoneRegex = /^(\+7|7|8)?[\s\-]?\(?[489][0-9]{2}\)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{2}[\s\-]?[0-9]{2}$/;
+    return phoneRegex.test(phone.replace(/\s/g, ''));
+}
+
+// Функция для нормализации номера телефона
+function normalizePhone(phone) {
+    // Удаляем все нецифровые символы
+    let normalized = phone.replace(/\D/g, '');
+
+    // Если номер начинается с 8, заменяем на +7
+    if (normalized.startsWith('8') && normalized.length === 11) {
+        normalized = '7' + normalized.slice(1);
+    }
+
+    // Если номер начинается с 7 и имеет 11 цифр, добавляем +
+    if (normalized.startsWith('7') && normalized.length === 11) {
+        normalized = '+' + normalized;
+    }
+
+    return normalized;
+}
+
+// Функция для получения access token Gigachat
+async function getGigachatAccessToken() {
     try {
         console.log('🔄 Получение токена Gigachat...');
 
@@ -105,13 +162,13 @@ async function getAccessToken() {
         );
 
         if (response.data.access_token) {
-            accessToken = response.data.access_token;
-            tokenExpires = Date.now() + (response.data.expires_in * 1000);
-            console.log('✅ Токен успешно получен');
-            return accessToken;
+            gigachatAccessToken = response.data.access_token;
+            gigachatTokenExpires = Date.now() + (response.data.expires_in * 1000);
+            console.log('✅ Токен Gigachat успешно получен');
+            return gigachatAccessToken;
         }
     } catch (error) {
-        console.error('❌ Ошибка при получении токена:');
+        console.error('❌ Ошибка при получении токена Gigachat:');
         console.error('Сообщение:', error.message);
 
         if (error.response) {
@@ -119,27 +176,82 @@ async function getAccessToken() {
             console.error('Данные:', JSON.stringify(error.response.data, null, 2));
         }
 
-        throw new Error('Не удалось получить access token. Проверьте Authorization Key');
+        throw new Error('Не удалось получить access token Gigachat');
     }
 }
 
-// Middleware для проверки и обновления токена
-async function ensureToken() {
-    if (!accessToken || Date.now() >= tokenExpires) {
-        await getAccessToken();
+// Функция для получения access token SaluteSpeech
+async function getSaluteSpeechAccessToken() {
+    try {
+        console.log('🔄 Получение токена SaluteSpeech...');
+
+        const response = await axiosInstance.post(
+            SALUTE_SPEECH_CONFIG.tokenUrl,
+            'scope=SALUTE_SPEECH_PERS',
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json',
+                    'Authorization': `Basic ${SALUTE_SPEECH_CONFIG.authorizationKey}`,
+                    'RqUID': SALUTE_SPEECH_CONFIG.rqUID
+                },
+                timeout: 10000
+            }
+        );
+
+        if (response.data.access_token) {
+            saluteSpeechAccessToken = response.data.access_token;
+            saluteSpeechTokenExpires = Date.now() + (response.data.expires_in * 1000);
+            console.log('✅ Токен SaluteSpeech успешно получен');
+            return saluteSpeechAccessToken;
+        }
+    } catch (error) {
+        console.error('❌ Ошибка при получении токена SaluteSpeech:');
+        console.error('Сообщение:', error.message);
+
+        if (error.response) {
+            console.error('Статус:', error.response.status);
+            console.error('Данные:', JSON.stringify(error.response.data, null, 2));
+        }
+
+        throw new Error('Не удалось получить access token SaluteSpeech');
     }
-    return accessToken;
+}
+
+// Middleware для проверки и обновления токена Gigachat
+async function ensureGigachatToken() {
+    if (!gigachatAccessToken || Date.now() >= gigachatTokenExpires) {
+        await getGigachatAccessToken();
+    }
+    return gigachatAccessToken;
+}
+
+// Middleware для проверки и обновления токена SaluteSpeech
+async function ensureSaluteSpeechToken() {
+    if (!saluteSpeechAccessToken || Date.now() >= saluteSpeechTokenExpires) {
+        await getSaluteSpeechAccessToken();
+    }
+    return saluteSpeechAccessToken;
 }
 
 // Промт для ИИ-Сонника
-const DREAM_INTERPRETER_PROMPT = `Ты — ИИ-Сонник. Твоя задача — интерпретировать сны пользователей в доброжелательном, немного мистическом стиле. 
-Ты можешь обращаться по имени, использовать мягкие метафоры и ассоциации. 
-Если сон содержит тревожные образы, ты утешай и предлагай символическое толкование. 
-Не используй медицинские или психологические термины.`;
+const DREAM_INTERPRETER_PROMPT = `# Ты — ИИ-Сонник
+
+## Задача
+Интерпретируй сны пользователей мягко и доброжелательно, используя легкий мистический тон. Обращайся к пользователям по имени, применяй метафоры и ассоциации. Если сюжет сна вызывает тревогу, успокой человека, предложив положительное символическое объяснение. Избегай использования научных терминов.
+
+## Правила
+- Всегда запрашивай текст сна перед началом интерпретации.
+- Если описание сна отсутствует, выводи только сообщение "Вы неправильно ввели сон" и ничего больше!!!.
+- При наличии тревожных элементов давай спокойные, поддерживающие комментарии.`;
+
+// Промт для общего чата
+const CHAT_PROMPT = `Ты — дружелюбный AI помощник от Сбербанка. Отвечай на вопросы вежливо и информативно. 
+Если не знаешь ответа, честно скажи об этом. Будь полезным и внимательным собеседником.`;
 
 // Функция для интерпретации снов
 async function interpretDream(dreamDescription, userName = 'дорогой друг') {
-    const token = await ensureToken();
+    const token = await ensureGigachatToken();
 
     const response = await axiosInstance.post(
         `${GIGACHAT_CONFIG.apiUrl}/chat/completions`,
@@ -172,13 +284,152 @@ async function interpretDream(dreamDescription, userName = 'дорогой др�
     return response.data.choices[0].message.content;
 }
 
-// Регистрация пользователя
+// Функция для общего чата
+async function chatWithAI(message, userName = 'пользователь') {
+    const token = await ensureGigachatToken();
+
+    const response = await axiosInstance.post(
+        `${GIGACHAT_CONFIG.apiUrl}/chat/completions`,
+        {
+            model: "GigaChat",
+            messages: [
+                {
+                    role: "system",
+                    content: CHAT_PROMPT
+                },
+                {
+                    role: "user",
+                    content: `${userName !== 'пользователь' ? `Пользователь ${userName} спрашивает: ` : ''}${message}`
+                }
+            ],
+            temperature: 0.7,
+            max_tokens: 1000,
+            top_p: 0.9
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            timeout: 30000
+        }
+    );
+
+    return response.data.choices[0].message.content;
+}
+
+// Функция для синтеза речи
+async function synthesizeSpeech(text, voice = 'Nec_24000') {
+    try {
+        const token = await ensureSaluteSpeechToken();
+
+        console.log('🔊 Синтез речи для текста:', text.substring(0, 50) + '...');
+
+        const response = await axiosInstance.post(
+            SALUTE_SPEECH_CONFIG.apiUrl,
+            {
+                text: text,
+                voice: voice,
+                format: 'opus',
+                speed: 1.0,
+                emotion: 'neutral'
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'audio/ogg'
+                },
+                responseType: 'arraybuffer',
+                timeout: 30000
+            }
+        );
+
+        // Генерируем уникальное имя файла
+        const filename = `audio_${uuidv4()}.opus`;
+        const filepath = path.join(__dirname, 'public', 'audio', filename);
+
+        // Сохраняем аудио файл
+        fs.writeFileSync(filepath, response.data);
+
+        console.log('✅ Аудио файл сохранен:', filename);
+        return filename;
+
+    } catch (error) {
+        console.error('❌ Ошибка при синтезе речи:');
+        console.error('Сообщение:', error.message);
+
+        if (error.response) {
+            console.error('Статус:', error.response.status);
+        }
+
+        throw new Error('Не удалось синтезировать речь');
+    }
+}
+
+// Сохранение информации об аудио файле в БД
+function saveAudioToDatabase(userId, dreamId, text, audioFilename) {
+    return new Promise((resolve, reject) => {
+        db.run(
+            `INSERT INTO audio_files (user_id, dream_id, text_content, audio_filename) VALUES (?, ?, ?, ?)`,
+            [userId, dreamId, text, audioFilename],
+            function(err) {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(this.lastID);
+                }
+            }
+        );
+    });
+}
+
+// Сохранение сообщения чата в БД
+function saveChatMessage(userId, message, response) {
+    return new Promise((resolve, reject) => {
+        db.run(
+            `INSERT INTO chat_messages (user_id, message_text, response_text) VALUES (?, ?, ?)`,
+            [userId, message, response],
+            function(err) {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(this.lastID);
+                }
+            }
+        );
+    });
+}
+
+// Получение истории чата
+function getChatHistory(userId, limit = 50) {
+    return new Promise((resolve, reject) => {
+        db.all(
+            `SELECT id, message_text, response_text, created_at
+             FROM chat_messages
+             WHERE user_id = ?
+             ORDER BY created_at DESC
+                 LIMIT ?`,
+            [userId, limit],
+            (err, messages) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(messages.reverse()); // Возвращаем в хронологическом порядке
+                }
+            }
+        );
+    });
+}
+
+// Регистрация пользователя по номеру телефона
 app.post('/api/register', async (req, res) => {
     try {
-        const { username, email, password, birthDate } = req.body;
+        const { username, phone, password } = req.body;
 
         // Валидация
-        if (!username || !email || !password || !birthDate) {
+        if (!username || !phone || !password) {
             return res.status(400).json({ error: 'Все поля обязательны для заполнения' });
         }
 
@@ -186,39 +437,37 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
         }
 
-        // Проверка email
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({ error: 'Некорректный email' });
+        // Проверка номера телефона
+        if (!validatePhone(phone)) {
+            return res.status(400).json({ error: 'Некорректный номер телефона. Используйте российский формат (+7 XXX XXX XX XX)' });
         }
 
-        // Проверка даты рождения
-        const birthDateObj = new Date(birthDate);
-        const today = new Date();
-        const age = today.getFullYear() - birthDateObj.getFullYear();
-
-        if (age < 13) {
-            return res.status(400).json({ error: 'Вы должны быть старше 13 лет' });
-        }
+        // Нормализация номера телефона
+        const normalizedPhone = normalizePhone(phone);
 
         // Хеширование пароля
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Сохранение пользователя в БД
         db.run(
-            `INSERT INTO users (username, email, password, birth_date) VALUES (?, ?, ?, ?)`,
-            [username, email, hashedPassword, birthDate],
+            `INSERT INTO users (username, phone, password) VALUES (?, ?, ?)`,
+            [username, normalizedPhone, hashedPassword],
             function(err) {
                 if (err) {
                     if (err.message.includes('UNIQUE constraint failed')) {
-                        return res.status(400).json({ error: 'Пользователь с таким email или именем уже существует' });
+                        if (err.message.includes('phone')) {
+                            return res.status(400).json({ error: 'Пользователь с таким номером телефона уже существует' });
+                        } else if (err.message.includes('username')) {
+                            return res.status(400).json({ error: 'Пользователь с таким именем уже существует' });
+                        }
+                        return res.status(400).json({ error: 'Пользователь с такими данными уже существует' });
                     }
                     return res.status(500).json({ error: 'Ошибка при регистрации пользователя' });
                 }
 
                 // Генерация JWT токена
                 const token = jwt.sign(
-                    { userId: this.lastID, username, email },
+                    { userId: this.lastID, username, phone: normalizedPhone },
                     JWT_SECRET,
                     { expiresIn: '24h' }
                 );
@@ -230,8 +479,7 @@ app.post('/api/register', async (req, res) => {
                     user: {
                         id: this.lastID,
                         username,
-                        email,
-                        birthDate
+                        phone: normalizedPhone
                     }
                 });
             }
@@ -243,37 +491,45 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
-// Авторизация пользователя
+// Авторизация пользователя по номеру телефона
 app.post('/api/login', async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { phone, password } = req.body;
 
-        if (!email || !password) {
-            return res.status(400).json({ error: 'Email и пароль обязательны' });
+        if (!phone || !password) {
+            return res.status(400).json({ error: 'Номер телефона и пароль обязательны' });
         }
+
+        // Проверка номера телефона
+        if (!validatePhone(phone)) {
+            return res.status(400).json({ error: 'Некорректный номер телефона' });
+        }
+
+        // Нормализация номера телефона
+        const normalizedPhone = normalizePhone(phone);
 
         // Поиск пользователя в БД
         db.get(
-            `SELECT * FROM users WHERE email = ?`,
-            [email],
+            `SELECT * FROM users WHERE phone = ?`,
+            [normalizedPhone],
             async (err, user) => {
                 if (err) {
                     return res.status(500).json({ error: 'Ошибка базы данных' });
                 }
 
                 if (!user) {
-                    return res.status(401).json({ error: 'Неверный email или пароль' });
+                    return res.status(401).json({ error: 'Неверный номер телефона или пароль' });
                 }
 
                 // Проверка пароля
                 const validPassword = await bcrypt.compare(password, user.password);
                 if (!validPassword) {
-                    return res.status(401).json({ error: 'Неверный email или пароль' });
+                    return res.status(401).json({ error: 'Неверный номер телефона или пароль' });
                 }
 
                 // Генерация JWT токена
                 const token = jwt.sign(
-                    { userId: user.id, username: user.username, email: user.email },
+                    { userId: user.id, username: user.username, phone: user.phone },
                     JWT_SECRET,
                     { expiresIn: '24h' }
                 );
@@ -285,8 +541,7 @@ app.post('/api/login', async (req, res) => {
                     user: {
                         id: user.id,
                         username: user.username,
-                        email: user.email,
-                        birthDate: user.birth_date
+                        phone: user.phone
                     }
                 });
             }
@@ -301,7 +556,7 @@ app.post('/api/login', async (req, res) => {
 // Получение профиля пользователя
 app.get('/api/profile', authenticateToken, (req, res) => {
     db.get(
-        `SELECT id, username, email, birth_date, created_at FROM users WHERE id = ?`,
+        `SELECT id, username, phone, created_at FROM users WHERE id = ?`,
         [req.user.userId],
         (err, user) => {
             if (err) {
@@ -317,8 +572,7 @@ app.get('/api/profile', authenticateToken, (req, res) => {
                 user: {
                     id: user.id,
                     username: user.username,
-                    email: user.email,
-                    birthDate: user.birth_date,
+                    phone: user.phone,
                     createdAt: user.created_at
                 }
             });
@@ -350,11 +604,11 @@ app.get('/api/dreams', authenticateToken, (req, res) => {
     const offset = (page - 1) * limit;
 
     db.all(
-        `SELECT id, dream_text, interpretation_text, created_at 
-     FROM dreams 
-     WHERE user_id = ? 
-     ORDER BY created_at DESC 
-     LIMIT ? OFFSET ?`,
+        `SELECT id, dream_text, interpretation_text, created_at
+         FROM dreams
+         WHERE user_id = ?
+         ORDER BY created_at DESC
+             LIMIT ? OFFSET ?`,
         [req.user.userId, limit, offset],
         (err, dreams) => {
             if (err) {
@@ -404,17 +658,27 @@ app.post('/api/interpret-dream', authenticateToken, async (req, res) => {
 
         const interpretation = await interpretDream(dream, req.user.username);
 
-        // Сохранение сна и интерпретации в базу данных
-        try {
-            await saveDreamToDatabase(req.user.userId, dream, interpretation);
-            console.log('💾 Сон сохранен в базу данных');
-        } catch (dbError) {
-            console.error('❌ Ошибка при сохранении в БД:', dbError);
+        // Проверяем, является ли ответ сообщением об ошибке ввода
+        const isErrorMessage = interpretation.includes('Вы неправильно ввели сон');
+
+        let dreamId = null;
+
+        // Сохранение сна и интерпретации в базу данных только если это не сообщение об ошибке
+        if (!isErrorMessage) {
+            try {
+                dreamId = await saveDreamToDatabase(req.user.userId, dream, interpretation);
+                console.log('💾 Сон сохранен в базу данных, ID:', dreamId);
+            } catch (dbError) {
+                console.error('❌ Ошибка при сохранении в БД:', dbError);
+            }
+        } else {
+            console.log('⚠️ Сон не сохранен в БД - получено сообщение об ошибке ввода');
         }
 
         res.json({
             success: true,
-            interpretation: interpretation
+            interpretation: interpretation,
+            dreamId: dreamId
         });
 
     } catch (error) {
@@ -430,6 +694,163 @@ app.post('/api/interpret-dream', authenticateToken, async (req, res) => {
             details: error.message
         });
     }
+});
+
+// API endpoint для общего чата
+app.post('/api/chat', authenticateToken, async (req, res) => {
+    try {
+        const { message } = req.body;
+
+        if (!message) {
+            return res.status(400).json({ error: 'Сообщение обязательно' });
+        }
+
+        console.log('💬 Чат от пользователя', req.user.userId, ':', message.substring(0, 50) + '...');
+
+        const response = await chatWithAI(message, req.user.username);
+
+        // Сохраняем сообщение в историю чата
+        try {
+            await saveChatMessage(req.user.userId, message, response);
+            console.log('💾 Сообщение чата сохранено в базу данных');
+        } catch (dbError) {
+            console.error('❌ Ошибка при сохранении сообщения чата:', dbError);
+        }
+
+        res.json({
+            success: true,
+            response: response
+        });
+
+    } catch (error) {
+        console.error('❌ Ошибка в чате:');
+        console.error('Сообщение:', error.message);
+
+        if (error.response) {
+            console.error('Статус:', error.response.status);
+        }
+
+        res.status(500).json({
+            error: 'Ошибка при обработке сообщения',
+            details: error.message
+        });
+    }
+});
+
+// Получение истории чата
+app.get('/api/chat/history', authenticateToken, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 50;
+
+        const messages = await getChatHistory(req.user.userId, limit);
+
+        res.json({
+            success: true,
+            messages: messages.map(m => ({
+                id: m.id,
+                message: m.message_text,
+                response: m.response_text,
+                createdAt: m.created_at
+            }))
+        });
+
+    } catch (error) {
+        console.error('❌ Ошибка при получении истории чата:');
+        console.error('Сообщение:', error.message);
+
+        res.status(500).json({
+            error: 'Ошибка при получении истории чата',
+            details: error.message
+        });
+    }
+});
+
+// API endpoint для синтеза речи
+app.post('/api/synthesize-speech', authenticateToken, async (req, res) => {
+    try {
+        const { text, dreamId, voice } = req.body;
+
+        if (!text) {
+            return res.status(400).json({ error: 'Текст для синтеза обязателен' });
+        }
+
+        console.log('🔊 Синтез речи для пользователя', req.user.userId, ':', text.substring(0, 50) + '...');
+
+        const audioFilename = await synthesizeSpeech(text, voice || 'Nec_24000');
+
+        // Сохраняем информацию об аудио файле в БД
+        try {
+            await saveAudioToDatabase(req.user.userId, dreamId || null, text, audioFilename);
+            console.log('💾 Информация об аудио файле сохранена в БД');
+        } catch (dbError) {
+            console.error('❌ Ошибка при сохранении информации об аудио файле:', dbError);
+        }
+
+        res.json({
+            success: true,
+            audioUrl: `/audio/${audioFilename}`,
+            filename: audioFilename
+        });
+
+    } catch (error) {
+        console.error('❌ Ошибка при синтезе речи:');
+        console.error('Сообщение:', error.message);
+
+        res.status(500).json({
+            error: 'Ошибка при синтезе речи',
+            details: error.message
+        });
+    }
+});
+
+// Получение истории аудио файлов пользователя
+app.get('/api/audio-history', authenticateToken, (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    db.all(
+        `SELECT af.*, d.dream_text
+         FROM audio_files af
+                  LEFT JOIN dreams d ON af.dream_id = d.id
+         WHERE af.user_id = ?
+         ORDER BY af.created_at DESC
+             LIMIT ? OFFSET ?`,
+        [req.user.userId, limit, offset],
+        (err, audioFiles) => {
+            if (err) {
+                return res.status(500).json({ error: 'Ошибка базы данных' });
+            }
+
+            // Получение общего количества аудио файлов
+            db.get(
+                `SELECT COUNT(*) as total FROM audio_files WHERE user_id = ?`,
+                [req.user.userId],
+                (err, countResult) => {
+                    if (err) {
+                        return res.status(500).json({ error: 'Ошибка базы данных' });
+                    }
+
+                    res.json({
+                        success: true,
+                        audioFiles: audioFiles.map(af => ({
+                            id: af.id,
+                            text: af.text_content,
+                            audioUrl: `/audio/${af.audio_filename}`,
+                            dreamText: af.dream_text,
+                            createdAt: af.created_at
+                        })),
+                        pagination: {
+                            page,
+                            limit,
+                            total: countResult.total,
+                            totalPages: Math.ceil(countResult.total / limit)
+                        }
+                    });
+                }
+            );
+        }
+    );
 });
 
 // Получение статистики пользователя
@@ -455,10 +876,12 @@ app.get('/api/stats', authenticateToken, (req, res) => {
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
     try {
-        await ensureToken();
+        await ensureGigachatToken();
+        await ensureSaluteSpeechToken();
         res.json({
             status: 'healthy',
-            token: accessToken ? 'available' : 'unavailable'
+            gigachatToken: gigachatAccessToken ? 'available' : 'unavailable',
+            saluteSpeechToken: saluteSpeechAccessToken ? 'available' : 'unavailable'
         });
     } catch (error) {
         res.status(500).json({
@@ -475,19 +898,32 @@ app.get('/', (req, res) => {
 
 // Запуск сервера
 app.listen(PORT, async () => {
+    // Создаем папку для аудио файлов если её нет
+    const audioDir = path.join(__dirname, 'public', 'audio');
+    if (!fs.existsSync(audioDir)) {
+        fs.mkdirSync(audioDir, { recursive: true });
+        console.log('📁 Создана папка для аудио файлов');
+    }
+
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
     console.log(`📱 URL: http://localhost:${PORT}`);
     console.log(`🌙 ИИ-Сонник активирован`);
+    console.log(`💬 Чат с AI подключен`);
+    console.log(`🔊 SaluteSpeech API подключен`);
+    console.log(`📞 Регистрация по номеру телефона включена`);
 
-    if (GIGACHAT_CONFIG.authorizationKey === 'YOUR_AUTHORIZATION_KEY_HERE') {
-        console.log('❌ ВНИМАНИЕ: Установите правильный Authorization Key в файле server.js');
-    } else {
-        try {
-            await getAccessToken();
-            console.log('✅ Gigachat токен инициализирован');
-        } catch (error) {
-            console.log('⚠️ Токен будет получен при первом запросе');
-        }
+    try {
+        await getGigachatAccessToken();
+        console.log('✅ Gigachat токен инициализирован');
+    } catch (error) {
+        console.log('⚠️ Gigachat токен будет получен при первом запросе');
+    }
+
+    try {
+        await getSaluteSpeechAccessToken();
+        console.log('✅ SaluteSpeech токен инициализирован');
+    } catch (error) {
+        console.log('⚠️ SaluteSpeech токен будет получен при первом запросе');
     }
 });
 
